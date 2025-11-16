@@ -411,6 +411,7 @@ async def check_training_readiness(db: Session = Depends(get_db)):
     """
     from src.db.models import Contract
     from src.config import settings
+    from sqlalchemy import func
 
     # Count contracts with outcomes
     total_contracts = db.query(func.count(Contract.id)).filter(

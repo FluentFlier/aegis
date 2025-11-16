@@ -113,7 +113,7 @@ class Supplier(Base):
     # Additional info
     description = Column(Text)
     tags = Column(JSON)  # Array of tags
-    metadata = Column(JSON)  # Additional flexible data
+    extra_metadata = Column(JSON)  # Additional flexible data
 
     # Relationships
     contracts = relationship("Contract", back_populates="supplier", cascade="all, delete-orphan")
@@ -169,7 +169,7 @@ class Contract(Base):
     clauses = Column(JSON)  # Array of contract clauses
     risk_flags = Column(JSON)  # Identified risk flags
     notes = Column(Text)
-    metadata = Column(JSON)
+    extra_metadata = Column(JSON)
 
     # Relationships
     supplier = relationship("Supplier", back_populates="contracts")
@@ -338,8 +338,8 @@ class AgentActivity(Base):
     result = Column(JSON)  # Agent output/findings
     error_message = Column(Text)
 
-    # Metadata
-    metadata = Column(JSON)
+    # Additional data
+    extra_metadata = Column(JSON)
 
     # Relationships
     supplier = relationship("Supplier", back_populates="agent_activities")
@@ -394,7 +394,7 @@ class ChatMessage(Base):
 
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    metadata = Column(JSON)
+    extra_metadata = Column(JSON)
 
     # Indexes
     __table_args__ = (
