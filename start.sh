@@ -18,13 +18,27 @@ NC='\033[0m' # No Color
 
 # Check if backend virtual environment exists
 if [ ! -d "aegis-backend/venv" ]; then
-    echo -e "${YELLOW}⚠  Backend virtual environment not found. Creating...${NC}"
+    echo -e "${YELLOW}⚠  Backend virtual environment not found.${NC}"
+    echo -e "${BLUE}Running setup script...${NC}"
+    ./setup-backend.sh
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}✗ Setup failed. Please check errors above.${NC}"
+        exit 1
+    fi
+else
+    # Check if dependencies are installed
     cd aegis-backend
-    python3 -m venv venv
     source venv/bin/activate
-    pip install -r requirements.txt
+    if ! python -c "import pydantic_settings" 2>/dev/null; then
+        echo -e "${YELLOW}⚠  Dependencies missing. Running setup...${NC}"
+        cd ..
+        ./setup-backend.sh
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}✗ Setup failed. Please check errors above.${NC}"
+            exit 1
+        fi
+    fi
     cd ..
-    echo -e "${GREEN}✓ Virtual environment created${NC}"
 fi
 
 # Check if frontend dependencies are installed
