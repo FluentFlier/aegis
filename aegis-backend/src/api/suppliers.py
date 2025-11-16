@@ -1,7 +1,7 @@
 """
 Supplier API endpoints - Complete CRUD operations, filtering, search, and risk assessment.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from typing import List, Optional
@@ -12,6 +12,7 @@ from src.db.database import get_db
 from src.db.models import Supplier, RiskAssessment, SupplierStatus
 from src.services.risk_scoring_service import RiskScoringService
 from src.agents.orchestrator import AegisOrchestrator
+from src.services.document_service import DocumentProcessingService
 
 router = APIRouter(prefix="/api/suppliers", tags=["suppliers"])
 
@@ -368,6 +369,42 @@ async def run_risk_assessment(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Assessment failed: {str(e)}")
+
+
+@router.post("/{supplier_id}/upload-document")
+async def upload_supplier_document(
+    supplier_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload and analyze a document for supplier risk assessment.
+
+    Supports PDF and TXT files. Runs AI agents on document content
+    to extract risk insights.
+    """
+    # Check supplier exists
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+
+    # Validate file type
+    allowed_extensions = ['.pdf', '.txt']
+    file_ext = '.' + file.filename.split('.')[-1].lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type not supported. Allowed: {', '.join(allowed_extensions)}"
+        )
+
+    # Process document
+    doc_service = DocumentProcessingService(upload_dir="uploaded_documents")
+
+    try:
+        result = await doc_service.process_document(file, supplier_id, db)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
 
 
 @router.get("/{supplier_id}/alerts")

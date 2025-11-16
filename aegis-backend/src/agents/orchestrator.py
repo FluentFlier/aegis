@@ -171,6 +171,60 @@ Respond in JSON format:
                 "risk_factors": {}
             }
 
+    async def analyze_document(
+        self,
+        document_text: str,
+        supplier: Supplier,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze uploaded document for financial risks."""
+
+        # Limit text to first 10000 characters to avoid token limits
+        text_sample = document_text[:10000]
+
+        prompt = f"""
+You are a financial risk analyst reviewing documents for supplier risk assessment.
+
+Supplier: {supplier.name}
+Document Type: {context.get('document_type', 'unknown')}
+Region: {supplier.region}
+
+Analyze the following document excerpt for financial risks:
+
+---
+{text_sample}
+---
+
+Assess financial risk indicators and provide a risk score from 0-100 (0=no risk, 100=extreme risk).
+Focus on: financial stability, cash flow, liquidity, debt, profitability, and market position.
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "cash_flow": "good/moderate/poor",
+        "debt_level": "low/moderate/high",
+        "profitability": "strong/moderate/weak"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            return self._parse_gemini_response(response.text)
+        except Exception as e:
+            logger.error(f"Financial document analysis error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Document analysis failed: {str(e)}"],
+                "recommendations": ["Conduct manual document review"],
+                "risk_factors": {}
+            }
+
 
 class LegalAgent(BaseAgent):
     """Analyzes legal compliance, contract risks, and regulatory issues."""
@@ -275,6 +329,53 @@ Respond in JSON format:
             "risk_factors": {}
         }
 
+    async def analyze_document(
+        self,
+        document_text: str,
+        supplier: Supplier,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze uploaded document for legal and compliance risks."""
+
+        text_sample = document_text[:10000]
+
+        prompt = f"""
+You are a legal risk analyst reviewing documents for supplier risk assessment.
+
+Supplier: {supplier.name}
+Document Type: {context.get('document_type', 'unknown')}
+Country: {supplier.country}
+
+Analyze the following document excerpt for legal and compliance risks:
+
+---
+{text_sample}
+---
+
+Assess legal risk indicators and provide a risk score from 0-100 (0=no risk, 100=extreme risk).
+Focus on: contract terms, regulatory compliance, litigation risks, IP concerns, and data privacy.
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "contract_terms": "favorable/neutral/unfavorable",
+        "regulatory_compliance": "compliant/partial/non-compliant",
+        "litigation_risk": "low/moderate/high"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            return self._parse_gemini_response(response.text)
+        except Exception as e:
+            logger.error(f"Legal document analysis error: {str(e)}")
+            return self._default_error_result(str(e))
+
 
 class ESGAgent(BaseAgent):
     """Analyzes environmental, social, and governance factors."""
@@ -362,6 +463,60 @@ Respond in JSON format:
                 "risk_factors": {}
             }
 
+    async def analyze_document(
+        self,
+        document_text: str,
+        supplier: Supplier,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze uploaded document for ESG risks."""
+
+        text_sample = document_text[:10000]
+
+        prompt = f"""
+You are an ESG (Environmental, Social, Governance) analyst reviewing documents for supplier risk assessment.
+
+Supplier: {supplier.name}
+Document Type: {context.get('document_type', 'unknown')}
+Country: {supplier.country}
+Category: {supplier.category}
+
+Analyze the following document excerpt for ESG risks:
+
+---
+{text_sample}
+---
+
+Assess ESG risk indicators and provide a risk score from 0-100 (0=excellent ESG, 100=very poor ESG).
+Focus on: environmental impact, labor practices, human rights, corporate governance, and sustainability.
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "environmental": "excellent/good/moderate/poor",
+        "social": "excellent/good/moderate/poor",
+        "governance": "excellent/good/moderate/poor"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            return self._parse_gemini_response(response.text)
+        except Exception as e:
+            logger.error(f"ESG document analysis error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Document analysis failed: {str(e)}"],
+                "recommendations": ["Conduct manual ESG review"],
+                "risk_factors": {}
+            }
+
 
 class GeopoliticalAgent(BaseAgent):
     """Analyzes geopolitical and climate risks."""
@@ -443,6 +598,60 @@ Respond in JSON format:
                 "confidence": 0.5,
                 "findings": [text[:500]],
                 "recommendations": [],
+                "risk_factors": {}
+            }
+
+    async def analyze_document(
+        self,
+        document_text: str,
+        supplier: Supplier,
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze uploaded document for geopolitical and climate risks."""
+
+        text_sample = document_text[:10000]
+
+        prompt = f"""
+You are a geopolitical risk analyst reviewing documents for supplier risk assessment.
+
+Supplier: {supplier.name}
+Document Type: {context.get('document_type', 'unknown')}
+Country: {supplier.country}
+Region: {supplier.region}
+
+Analyze the following document excerpt for geopolitical and climate risks:
+
+---
+{text_sample}
+---
+
+Assess geopolitical risk indicators and provide a risk score from 0-100 (0=no risk, 100=extreme risk).
+Focus on: political stability, trade regulations, sanctions, climate risks, and regional conflicts.
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "political_stability": "stable/moderate/unstable",
+        "trade_risk": "low/moderate/high",
+        "climate_risk": "low/moderate/high"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            return self._parse_gemini_response(response.text)
+        except Exception as e:
+            logger.error(f"Geopolitical document analysis error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Document analysis failed: {str(e)}"],
+                "recommendations": ["Conduct manual geopolitical review"],
                 "risk_factors": {}
             }
 

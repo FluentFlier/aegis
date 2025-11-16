@@ -51,75 +51,64 @@ def seed_initial_risk_matrix(db: Session):
 
 
 def seed_suppliers(db: Session):
-    """Create diverse set of sample suppliers."""
-    print("Creating sample suppliers...")
+    """Create real cafe suppliers for supply chain risk management."""
+    print("Creating real cafe suppliers...")
 
     suppliers_data = [
         {
-            "name": "TechFlow Industries",
+            "name": "Sysco Corporation",
             "status": SupplierStatus.ACTIVE,
-            "region": "Asia-Pacific",
-            "country": "China",
-            "category": "Electronics Manufacturing",
-            "annual_volume": 2500000.0,
-            "contact_name": "Li Wei",
-            "contact_email": "li.wei@techflow.com",
-            "description": "Leading electronics manufacturer specializing in semiconductors"
-        },
-        {
-            "name": "Apex Manufacturing Co",
-            "status": SupplierStatus.CRITICAL,
             "region": "North America",
             "country": "United States",
-            "category": "Heavy Machinery",
-            "annual_volume": 5800000.0,
-            "contact_name": "John Smith",
-            "contact_email": "j.smith@apexmfg.com",
-            "description": "Industrial machinery and equipment manufacturer"
+            "category": "Food Distribution",
+            "annual_volume": 450000.0,
+            "contact_name": "Sarah Johnson",
+            "contact_email": "foodservice@sysco.com",
+            "description": "Leading global foodservice distributor providing fresh produce, dairy, proteins, and kitchen supplies to restaurants and cafes"
         },
         {
-            "name": "GreenSource Solutions",
+            "name": "US Foods",
             "status": SupplierStatus.ACTIVE,
+            "region": "North America",
+            "country": "United States",
+            "category": "Food & Beverage Distribution",
+            "annual_volume": 380000.0,
+            "contact_name": "Michael Chen",
+            "contact_email": "customercare@usfoods.com",
+            "description": "Major foodservice distributor offering dairy products, fresh produce, meats, and bakery ingredients"
+        },
+        {
+            "name": "Lavazza Coffee",
+            "status": SupplierStatus.CRITICAL,
             "region": "Europe",
-            "country": "Germany",
-            "category": "Sustainable Materials",
-            "annual_volume": 1200000.0,
-            "contact_name": "Anna Schmidt",
-            "contact_email": "a.schmidt@greensource.de",
-            "description": "Eco-friendly materials supplier with strong ESG credentials"
+            "country": "Italy",
+            "category": "Coffee & Espresso",
+            "annual_volume": 285000.0,
+            "contact_name": "Marco Rossi",
+            "contact_email": "commercial@lavazza.com",
+            "description": "Premium Italian coffee roaster and espresso machine supplier with 125+ years of expertise in specialty coffee"
         },
         {
-            "name": "GlobalTrade Logistics",
-            "status": SupplierStatus.UNDER_REVIEW,
-            "region": "Middle East",
-            "country": "United Arab Emirates",
-            "category": "Logistics & Distribution",
-            "annual_volume": 3400000.0,
-            "contact_name": "Mohammed Al-Rashid",
-            "contact_email": "m.rashid@globaltrade.ae",
-            "description": "International logistics and supply chain services"
-        },
-        {
-            "name": "Pacific Components Ltd",
+            "name": "The Coca-Cola Company",
             "status": SupplierStatus.ACTIVE,
-            "region": "Asia-Pacific",
-            "country": "South Korea",
-            "category": "Electronics Components",
-            "annual_volume": 1900000.0,
-            "contact_name": "Kim Min-jun",
-            "contact_email": "kim@pacificcomp.kr",
-            "description": "High-quality electronic components manufacturer"
+            "region": "North America",
+            "country": "United States",
+            "category": "Beverages",
+            "annual_volume": 195000.0,
+            "contact_name": "Jennifer Martinez",
+            "contact_email": "foodservice@coca-cola.com",
+            "description": "Global beverage leader providing sodas, juices, water, and fountain drink systems for foodservice"
         },
         {
-            "name": "Nordic Steel Group",
+            "name": "Rich Products Corporation",
             "status": SupplierStatus.ACTIVE,
-            "region": "Europe",
-            "country": "Sweden",
-            "category": "Raw Materials",
-            "annual_volume": 4200000.0,
-            "contact_name": "Erik Andersson",
-            "contact_email": "e.andersson@nordicsteel.se",
-            "description": "Steel and metal products supplier"
+            "region": "North America",
+            "country": "United States",
+            "category": "Bakery & Frozen Foods",
+            "annual_volume": 215000.0,
+            "contact_name": "David Thompson",
+            "contact_email": "foodservice@rich.com",
+            "description": "Family-owned supplier of frozen bakery products, pastries, donuts, and specialty desserts for cafes and bakeries"
         },
     ]
 
@@ -194,14 +183,13 @@ def seed_risk_assessments(db: Session, suppliers: list, risk_matrix: RiskMatrixV
 
     assessments = []
 
-    # Risk score patterns for different supplier types
+    # Risk score patterns for real cafe suppliers
     risk_patterns = {
-        "TechFlow Industries": {"base": 35, "variance": 10},  # Moderate risk
-        "Apex Manufacturing Co": {"base": 75, "variance": 15},  # High risk
-        "GreenSource Solutions": {"base": 20, "variance": 5},   # Low risk
-        "GlobalTrade Logistics": {"base": 55, "variance": 12},  # Medium-high risk
-        "Pacific Components Ltd": {"base": 30, "variance": 8},  # Low-moderate risk
-        "Nordic Steel Group": {"base": 25, "variance": 7},      # Low risk
+        "Sysco Corporation": {"base": 22, "variance": 6},  # Low risk - stable, large, publicly traded
+        "US Foods": {"base": 25, "variance": 7},   # Low risk - major distributor, reliable
+        "Lavazza Coffee": {"base": 45, "variance": 12},  # Medium risk - international, critical dependency
+        "The Coca-Cola Company": {"base": 18, "variance": 5},  # Very low risk - global leader, stable
+        "Rich Products Corporation": {"base": 28, "variance": 8},  # Low-moderate risk - family-owned, reliable
     }
 
     # Create historical assessments (last 90 days)
@@ -280,20 +268,20 @@ def seed_alerts(db: Session, suppliers: list):
 
     alerts_data = [
         {
-            "supplier_id": suppliers[1].id,  # Apex (Critical supplier)
-            "title": "Legal Risk Spike Detected",
-            "message": "Regulatory compliance issues identified in recent filings. Immediate review recommended.",
+            "supplier_id": suppliers[2].id,  # Lavazza Coffee (Critical supplier)
+            "title": "Geopolitical Risk Alert - Coffee Supply Chain",
+            "message": "Climate change affecting coffee bean harvest in Brazil and Colombia. Price volatility expected. Consider diversifying coffee suppliers.",
             "severity": AlertSeverity.CRITICAL,
-            "category": "Legal",
+            "category": "Geopolitical",
             "is_read": False,
             "is_resolved": False,
             "source": "agent",
-            "source_agent": AgentType.LEGAL,
+            "source_agent": AgentType.GEOPOLITICAL,
         },
         {
-            "supplier_id": suppliers[3].id,  # GlobalTrade
-            "title": "Delayed Shipment",
-            "message": "Two consecutive shipments delayed by more than 7 days. Operational risk increasing.",
+            "supplier_id": suppliers[0].id,  # Sysco
+            "title": "Delivery Schedule Update",
+            "message": "Sysco has updated delivery schedules for fresh produce. New routes may affect morning delivery times.",
             "severity": AlertSeverity.WARNING,
             "category": "Operational",
             "is_read": True,
@@ -301,15 +289,15 @@ def seed_alerts(db: Session, suppliers: list):
             "source": "system",
         },
         {
-            "supplier_id": suppliers[0].id,  # TechFlow
-            "title": "Financial Performance Update",
-            "message": "Q3 earnings report shows improved cash flow and reduced debt levels.",
+            "supplier_id": suppliers[4].id,  # Rich Products
+            "title": "New Product Line Available",
+            "message": "Rich Products launched new line of gluten-free pastries and vegan desserts. Samples available for tasting.",
             "severity": AlertSeverity.INFO,
-            "category": "Financial",
+            "category": "Operational",
             "is_read": True,
             "is_resolved": True,
             "source": "agent",
-            "source_agent": AgentType.FINANCIAL,
+            "source_agent": AgentType.OPERATIONAL,
         },
     ]
 
