@@ -122,8 +122,6 @@ app.include_router(alerts.router)
 app.include_router(analytics.router)
 app.include_router(ml_models.router)
 
-logger.info("✓ All API routers registered")
-
 
 # Root endpoint
 @app.get("/", tags=["Root"])
