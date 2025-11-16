@@ -2,8 +2,8 @@
 Configuration module for Aegis backend.
 Loads environment variables and provides application settings.
 """
-from pydantic_settings import BaseSettings
-from pydantic import Field, validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 from typing import Optional
 import os
 from pathlib import Path
@@ -14,8 +14,8 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: str = Field(
-        default="postgresql://aegis_user:aegis_password@localhost:5432/aegis_db",
-        description="PostgreSQL database connection URL"
+        default="sqlite:///./aegis.db",
+        description="Database connection URL (SQLite by default, PostgreSQL for production)"
     )
     DATABASE_POOL_SIZE: int = Field(default=20, description="Database connection pool size")
     DATABASE_MAX_OVERFLOW: int = Field(default=40, description="Max overflow connections")
@@ -95,22 +95,12 @@ class Settings(BaseSettings):
         description="Path to store ML models"
     )
 
-    @validator("GOOGLE_API_KEY")
-    def validate_api_key(cls, v):
-        """Validate that API key is set in production."""
-        return v
-
-    @validator("SECRET_KEY")
-    def validate_secret_key(cls, v, values):
-        """Validate that secret key is changed in production."""
-        if values.get("ENVIRONMENT") == "production" and v == "your-secret-key-change-in-production":
-            raise ValueError("SECRET_KEY must be changed in production")
-        return v
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": True,
+        "extra": "ignore"
+    }
 
 
 # Global settings instance
