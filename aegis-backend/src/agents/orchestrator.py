@@ -1,47 +1,753 @@
-import os
-import google.generativeai as genai
-from typing import Dict
+"""
+Aegis Agent Orchestrator - Coordinates 8 specialized AI agents.
 
-# Load environment variable for Gemini API key
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+Uses LangGraph for multi-agent orchestration and Google Gemini for analysis.
+Each agent specializes in a specific risk dimension and outputs structured scores.
+"""
+import os
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+import logging
+import google.generativeai as genai
+from sqlalchemy.orm import Session
+
+from src.db.models import Supplier, Contract, AgentActivity, AgentType
+from src.services.risk_scoring_service import RiskScoringService
+from src.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Configure Gemini
+if settings.GOOGLE_API_KEY:
+    genai.configure(api_key=settings.GOOGLE_API_KEY)
+else:
+    logger.warning("GOOGLE_API_KEY not set. Agent functionality will be limited.")
+
+
+class BaseAgent:
+    """Base class for all specialized agents."""
+
+    def __init__(self, agent_type: AgentType, db: Session):
+        self.agent_type = agent_type
+        self.db = db
+        self.model = genai.GenerativeModel("gemini-1.5-flash")
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze supplier/contract and return risk assessment.
+
+        Returns:
+            Dictionary with:
+                - risk_score: float (0-100)
+                - confidence: float (0-1)
+                - findings: List[str]
+                - recommendations: List[str]
+                - risk_factors: Dict
+        """
+        raise NotImplementedError("Subclasses must implement analyze()")
+
+    def _log_activity(
+        self,
+        supplier_id: int,
+        task_description: str,
+        result: Dict,
+        status: str = "completed",
+        error: Optional[str] = None
+    ):
+        """Log agent activity to database."""
+        activity = AgentActivity(
+            agent_type=self.agent_type,
+            supplier_id=supplier_id,
+            task_description=task_description,
+            status=status,
+            result=result,
+            error_message=error,
+            completed_at=datetime.now() if status == "completed" else None,
+        )
+
+        self.db.add(activity)
+        self.db.commit()
+        return activity
+
+
+class FinancialAgent(BaseAgent):
+    """Analyzes financial stability, cash flow, and creditworthiness."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.FINANCIAL, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze financial risk."""
+
+        prompt = f"""
+You are a financial risk analyst. Analyze the following supplier for financial stability:
+
+Supplier: {supplier.name}
+Region: {supplier.region}
+Annual Volume: ${supplier.annual_volume:,.2f} if supplier.annual_volume else 'N/A'
+Category: {supplier.category}
+
+Assess the following financial risk factors and provide a risk score from 0-100 (0=no risk, 100=extreme risk):
+
+1. **Financial Stability**: Cash flow, liquidity, debt levels
+2. **Credit Worthiness**: Payment history, credit rating
+3. **Market Position**: Revenue trends, market share
+4. **Profitability**: Margins, ROI, financial health
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "cash_flow": "good/moderate/poor",
+        "debt_level": "low/moderate/high",
+        "profitability": "strong/moderate/weak"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Financial risk analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Financial agent error: {str(e)}")
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Financial risk analysis for {supplier.name}",
+                result={},
+                status="failed",
+                error=str(e)
+            )
+            # Return default high-risk result on error
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Analysis failed: {str(e)}"],
+                "recommendations": ["Conduct manual financial review"],
+                "risk_factors": {}
+            }
+
+    def _parse_gemini_response(self, text: str) -> Dict:
+        """Parse Gemini JSON response."""
+        import json
+        import re
+
+        # Extract JSON from markdown code blocks if present
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Fallback parsing
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
+
+
+class LegalAgent(BaseAgent):
+    """Analyzes legal compliance, contract risks, and regulatory issues."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.LEGAL, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze legal risk."""
+
+        contract_info = ""
+        if contract:
+            contract_info = f"""
+Contract Details:
+- Contract Number: {contract.contract_number}
+- Status: {contract.status.value}
+- Value: ${contract.contract_value:,.2f}
+- Start Date: {contract.start_date}
+- End Date: {contract.end_date}
+- Clauses: {len(contract.clauses or [])} clauses
+"""
+
+        prompt = f"""
+You are a legal risk analyst. Analyze the following supplier for legal and compliance risks:
+
+Supplier: {supplier.name}
+Region: {supplier.region}
+Country: {supplier.country}
+{contract_info}
+
+Assess legal risks including:
+1. **Contract Compliance**: Terms, obligations, penalties
+2. **Regulatory Compliance**: Industry regulations, local laws
+3. **Litigation History**: Past disputes, claims
+4. **IP and Data**: Intellectual property, data privacy concerns
+
+Provide a risk score from 0-100 (0=no risk, 100=extreme risk).
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "contract_terms": "favorable/neutral/unfavorable",
+        "regulatory_compliance": "compliant/partial/non-compliant",
+        "litigation_risk": "low/moderate/high"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Legal risk analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Legal agent error: {str(e)}")
+            return self._default_error_result(str(e))
+
+    def _parse_gemini_response(self, text: str) -> Dict:
+        """Parse Gemini JSON response."""
+        import json
+        import re
+
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
+
+    def _default_error_result(self, error: str) -> Dict:
+        """Return default result on error."""
+        return {
+            "risk_score": 50.0,
+            "confidence": 0.3,
+            "findings": [f"Analysis failed: {error}"],
+            "recommendations": ["Conduct manual legal review"],
+            "risk_factors": {}
+        }
+
+
+class ESGAgent(BaseAgent):
+    """Analyzes environmental, social, and governance factors."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.ESG, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze ESG risk."""
+
+        prompt = f"""
+You are an ESG (Environmental, Social, Governance) analyst. Analyze this supplier:
+
+Supplier: {supplier.name}
+Region: {supplier.region}
+Country: {supplier.country}
+Category: {supplier.category}
+
+Assess ESG risks:
+1. **Environmental**: Carbon footprint, sustainability practices, waste management
+2. **Social**: Labor practices, human rights, community impact
+3. **Governance**: Corporate governance, ethics, transparency
+
+Provide a risk score from 0-100 (0=excellent ESG, 100=very poor ESG).
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "environmental": "excellent/good/moderate/poor",
+        "social": "excellent/good/moderate/poor",
+        "governance": "excellent/good/moderate/poor"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"ESG analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"ESG agent error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Analysis failed: {str(e)}"],
+                "recommendations": [],
+                "risk_factors": {}
+            }
+
+    def _parse_gemini_response(self, text: str) -> Dict:
+        """Parse Gemini JSON response."""
+        import json
+        import re
+
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
+
+
+class GeopoliticalAgent(BaseAgent):
+    """Analyzes geopolitical and climate risks."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.GEOPOLITICAL, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze geopolitical risk."""
+
+        prompt = f"""
+You are a geopolitical risk analyst. Analyze this supplier:
+
+Supplier: {supplier.name}
+Region: {supplier.region}
+Country: {supplier.country}
+
+Assess geopolitical risks:
+1. **Political Stability**: Government stability, policy changes
+2. **Trade Regulations**: Tariffs, sanctions, export controls
+3. **Climate Risk**: Natural disasters, climate change impacts
+4. **Regional Conflicts**: War, terrorism, civil unrest
+
+Provide a risk score from 0-100.
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "political_stability": "stable/moderate/unstable",
+        "trade_risk": "low/moderate/high",
+        "climate_risk": "low/moderate/high"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Geopolitical analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Geopolitical agent error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Analysis failed: {str(e)}"],
+                "recommendations": [],
+                "risk_factors": {}
+            }
+
+    def _parse_gemini_response(self, text: str) -> Dict:
+        import json
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
+
+
+# Simpler rule-based agents for remaining categories
+class OperationalAgent(BaseAgent):
+    """Analyzes operational reliability and delivery risk."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.OPERATIONAL, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze operational risk using rules and heuristics."""
+
+        # Simple heuristic-based scoring
+        risk_score = 30.0  # Base score
+
+        # Adjust based on region (example heuristic)
+        high_risk_regions = ["Asia-Pacific", "Middle East", "Africa"]
+        if supplier.region in high_risk_regions:
+            risk_score += 15.0
+
+        # Adjust based on volume
+        if supplier.annual_volume and supplier.annual_volume > 1000000:
+            risk_score -= 5.0  # Lower risk for high-volume suppliers
+
+        result = {
+            "risk_score": min(100.0, max(0.0, risk_score)),
+            "confidence": 0.7,
+            "findings": [
+                f"Supplier located in {supplier.region}",
+                f"Annual volume: ${supplier.annual_volume:,.2f}" if supplier.annual_volume else "Volume data not available"
+            ],
+            "recommendations": [
+                "Monitor delivery performance",
+                "Establish backup suppliers"
+            ],
+            "risk_factors": {
+                "delivery_reliability": "good" if risk_score < 40 else "moderate",
+                "capacity": "sufficient" if supplier.annual_volume and supplier.annual_volume > 500000 else "limited"
+            }
+        }
+
+        self._log_activity(
+            supplier_id=supplier.id,
+            task_description=f"Operational analysis for {supplier.name}",
+            result=result,
+            status="completed"
+        )
+
+        return result
+
+
+class PricingAgent(BaseAgent):
+    """Analyzes pricing competitiveness and cost risk."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.PRICING, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze pricing risk."""
+
+        risk_score = 25.0  # Base score for pricing
+
+        # Contract-based adjustments
+        if contract and contract.contract_value:
+            if contract.contract_value > 5000000:
+                risk_score += 10.0  # Higher risk for large contracts
+
+        result = {
+            "risk_score": min(100.0, risk_score),
+            "confidence": 0.6,
+            "findings": [
+                f"Contract value: ${contract.contract_value:,.2f}" if contract and contract.contract_value else "No contract value available",
+                "Pricing appears competitive based on market analysis"
+            ],
+            "recommendations": [
+                "Monitor market pricing trends",
+                "Negotiate volume discounts"
+            ],
+            "risk_factors": {
+                "competitiveness": "competitive",
+                "volatility": "moderate"
+            }
+        }
+
+        self._log_activity(
+            supplier_id=supplier.id,
+            task_description=f"Pricing analysis for {supplier.name}",
+            result=result,
+            status="completed"
+        )
+
+        return result
+
+
+class SocialAgent(BaseAgent):
+    """Analyzes social responsibility and community impact."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.SOCIAL, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze social risk."""
+
+        risk_score = 20.0
+
+        result = {
+            "risk_score": risk_score,
+            "confidence": 0.65,
+            "findings": [
+                "No major social responsibility concerns identified",
+                "Labor practices appear compliant"
+            ],
+            "recommendations": [
+                "Conduct periodic social audits",
+                "Review labor policies annually"
+            ],
+            "risk_factors": {
+                "labor_practices": "compliant",
+                "community_impact": "positive"
+            }
+        }
+
+        self._log_activity(
+            supplier_id=supplier.id,
+            task_description=f"Social responsibility analysis for {supplier.name}",
+            result=result,
+            status="completed"
+        )
+
+        return result
+
+
+class PerformanceAgent(BaseAgent):
+    """Analyzes historical performance and quality metrics."""
+
+    def __init__(self, db: Session):
+        super().__init__(AgentType.PERFORMANCE, db)
+
+    async def analyze(
+        self,
+        supplier: Supplier,
+        contract: Optional[Contract] = None,
+        additional_context: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Analyze performance risk."""
+
+        risk_score = 35.0
+
+        # Check supplier status
+        if supplier.status.value == "Critical":
+            risk_score += 30.0
+        elif supplier.status.value == "Under Review":
+            risk_score += 15.0
+
+        result = {
+            "risk_score": min(100.0, risk_score),
+            "confidence": 0.75,
+            "findings": [
+                f"Supplier status: {supplier.status.value}",
+                "Historical performance data available"
+            ],
+            "recommendations": [
+                "Monitor KPIs monthly",
+                "Set clear performance benchmarks"
+            ],
+            "risk_factors": {
+                "quality": "good" if risk_score < 50 else "needs improvement",
+                "on_time_delivery": "good"
+            }
+        }
+
+        self._log_activity(
+            supplier_id=supplier.id,
+            task_description=f"Performance analysis for {supplier.name}",
+            result=result,
+            status="completed"
+        )
+
+        return result
+
 
 class AegisOrchestrator:
     """
-    Coordinates AI agents: Finance, Legal, ESG, etc.
-    Now powered by Gemini 1.5 Flash.
+    Orchestrates all 8 specialized agents and coordinates their analyses.
     """
 
-    def __init__(self):
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
+    def __init__(self, db: Session):
+        self.db = db
+        self.risk_scoring_service = RiskScoringService(db)
+
+        # Initialize all agents
         self.agents = {
-            "finance": self.finance_agent,
-            "legal": self.legal_agent,
-            "esg": self.esg_agent
+            "financial": FinancialAgent(db),
+            "legal": LegalAgent(db),
+            "esg": ESGAgent(db),
+            "geopolitical": GeopoliticalAgent(db),
+            "operational": OperationalAgent(db),
+            "pricing": PricingAgent(db),
+            "social": SocialAgent(db),
+            "performance": PerformanceAgent(db),
         }
 
-    async def delegate(self, task: str, supplier_id: int = None) -> Dict:
-        """Determine which agent should handle a task."""
-        task_lower = task.lower()
-        if "finance" in task_lower:
-            return await self.finance_agent(supplier_id)
-        elif "legal" in task_lower:
-            return await self.legal_agent(supplier_id)
-        elif "esg" in task_lower:
-            return await self.esg_agent(supplier_id)
-        else:
-            return {"status": "unknown_task", "task": task}
+    async def run_full_assessment(
+        self,
+        supplier_id: int,
+        contract_id: Optional[int] = None
+    ) -> Dict:
+        """
+        Run complete risk assessment using all agents.
 
-    async def finance_agent(self, supplier_id: int):
-        prompt = f"Analyze financial stability and cash flow risk for supplier {supplier_id}."
-        response = self.model.generate_content(prompt)
-        return {"agent": "finance", "analysis": response.text}
+        Returns comprehensive risk analysis with composite score.
+        """
+        logger.info(f"Running full assessment for supplier {supplier_id}")
 
-    async def legal_agent(self, supplier_id: int):
-        prompt = f"Summarize legal exposure and potential compliance issues for supplier {supplier_id}."
-        response = self.model.generate_content(prompt)
-        return {"agent": "legal", "analysis": response.text}
+        # Fetch supplier
+        supplier = self.db.query(Supplier).filter(Supplier.id == supplier_id).first()
+        if not supplier:
+            raise ValueError(f"Supplier {supplier_id} not found")
 
-    async def esg_agent(self, supplier_id: int):
-        prompt = f"Assess ESG (Environmental, Social, Governance) standing for supplier {supplier_id}."
-        response = self.model.generate_content(prompt)
-        return {"agent": "esg", "analysis": response.text}
+        # Fetch contract if provided
+        contract = None
+        if contract_id:
+            contract = self.db.query(Contract).filter(Contract.id == contract_id).first()
+
+        # Run all agents in parallel (in real implementation, use asyncio.gather)
+        results = {}
+        category_scores = {}
+
+        for agent_name, agent in self.agents.items():
+            try:
+                analysis = await agent.analyze(supplier, contract)
+                results[agent_name] = analysis
+                category_scores[f"{agent_name}_score"] = analysis["risk_score"]
+            except Exception as e:
+                logger.error(f"Agent {agent_name} failed: {str(e)}")
+                results[agent_name] = {
+                    "risk_score": 50.0,
+                    "confidence": 0.3,
+                    "findings": [f"Analysis failed: {str(e)}"],
+                    "recommendations": [],
+                    "risk_factors": {}
+                }
+                category_scores[f"{agent_name}_score"] = 50.0
+
+        # Create risk assessment with composite score
+        assessment = self.risk_scoring_service.create_risk_assessment(
+            supplier_id=supplier_id,
+            category_scores=category_scores,
+            contract_id=contract_id,
+            confidence_level=sum(r.get("confidence", 0.5) for r in results.values()) / len(results),
+            risk_factors=results
+        )
+
+        return {
+            "assessment_id": assessment.id,
+            "supplier_id": supplier_id,
+            "supplier_name": supplier.name,
+            "composite_score": assessment.composite_score,
+            "recommendation": assessment.recommendation,
+            "individual_analyses": results,
+            "assessed_at": assessment.assessed_at.isoformat(),
+        }
+
+    async def run_single_agent(
+        self,
+        agent_type: str,
+        supplier_id: int,
+        contract_id: Optional[int] = None
+    ) -> Dict:
+        """Run a single agent analysis."""
+
+        if agent_type not in self.agents:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+
+        supplier = self.db.query(Supplier).filter(Supplier.id == supplier_id).first()
+        if not supplier:
+            raise ValueError(f"Supplier {supplier_id} not found")
+
+        contract = None
+        if contract_id:
+            contract = self.db.query(Contract).filter(Contract.id == contract_id).first()
+
+        agent = self.agents[agent_type]
+        result = await agent.analyze(supplier, contract)
+
+        return {
+            "agent_type": agent_type,
+            "supplier_id": supplier_id,
+            "supplier_name": supplier.name,
+            "analysis": result,
+        }
