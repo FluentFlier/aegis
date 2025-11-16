@@ -3,6 +3,7 @@ import { Supplier, Recommendation } from '../../types';
 import { RiskArrow } from '../RiskArrow';
 import { TrendChart } from '../TrendChart';
 import { ScenarioSimulator } from '../ScenarioSimulator';
+import { DocumentUpload } from '../DocumentUpload';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -19,6 +20,7 @@ import {
   CheckCircle2,
   MessageSquare,
   Activity,
+  Upload,
 } from 'lucide-react';
 
 interface SupplierDetailProps {
@@ -200,34 +202,64 @@ export function SupplierDetail({
           </Card>
         </div>
 
-        {/* Contract Panel */}
-        <Card className="p-6 bg-white">
-          <h2 className="text-gray-900 mb-4">Contract Overview</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Contract Status</p>
-              <p className="text-gray-900">{supplier.contractStatus}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Payment Terms</p>
-              <p className="text-gray-900">Net 30</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-600 mb-1">Auto-Renewal</p>
-              <p className="text-gray-900">Enabled</p>
-            </div>
-          </div>
-          <Separator className="my-4" />
-          <div className="flex gap-3">
-            <Button variant="outline" className="gap-2">
-              <FileText className="w-4 h-4" />
-              View Full Contract
-            </Button>
-            <Button variant="outline" className="gap-2">
-              <TrendingUp className="w-4 h-4" />
-              Contract Analysis
-            </Button>
-          </div>
+        {/* Contract Panel with Tabs */}
+        <Card className="bg-white">
+          <Tabs defaultValue="overview" className="w-full">
+            <TabsList className="w-full border-b rounded-none bg-transparent p-0">
+              <TabsTrigger
+                value="overview"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#2EB8A9] data-[state=active]:bg-transparent"
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Contract Overview
+              </TabsTrigger>
+              <TabsTrigger
+                value="upload"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#2EB8A9] data-[state=active]:bg-transparent"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Upload & Analyze Contract
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Contract Status</p>
+                  <p className="text-gray-900">{supplier.contractStatus || 'Active'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Payment Terms</p>
+                  <p className="text-gray-900">Net 30</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Auto-Renewal</p>
+                  <p className="text-gray-900">Enabled</p>
+                </div>
+              </div>
+              <Separator className="my-4" />
+              <div className="flex gap-3">
+                <Button variant="outline" className="gap-2">
+                  <FileText className="w-4 h-4" />
+                  View Full Contract
+                </Button>
+                <Button variant="outline" className="gap-2">
+                  <TrendingUp className="w-4 h-4" />
+                  Contract Analysis
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="upload" className="p-6">
+              <DocumentUpload
+                supplierId={supplier.id}
+                supplierName={supplier.name}
+                onAnalysisComplete={(analysis) => {
+                  console.log('Analysis complete:', analysis);
+                }}
+              />
+            </TabsContent>
+          </Tabs>
         </Card>
 
         {/* Scenario Simulator */}
