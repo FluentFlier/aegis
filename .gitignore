@@ -86,3 +86,6 @@ logs/
 # IDE specific
 .vscode/settings.json
 .vscode/launch.json
+
+# Uploaded documents (user files)
+uploaded_documents/
