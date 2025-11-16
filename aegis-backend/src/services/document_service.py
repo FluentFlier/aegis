@@ -18,6 +18,7 @@ from src.db.models import Supplier
 from src.agents.orchestrator import (
     FinancialAgent, LegalAgent, ESGAgent, GeopoliticalAgent
 )
+from src.services.contract_risk_matrix import ContractRiskMatrix
 
 
 class DocumentProcessingService:
@@ -138,6 +139,15 @@ class DocumentProcessingService:
             "supplier_category": supplier.category
         }
 
+        # First, if this is a contract, analyze using contract risk matrix
+        contract_analysis = None
+        if context["document_type"] == "contract":
+            # Analyze from cafe (buyer) perspective
+            contract_analysis = ContractRiskMatrix.analyze_contract_text(
+                text_content,
+                perspective="buyer"
+            )
+
         # Run agents in parallel
         results = {}
 
@@ -186,13 +196,19 @@ class DocumentProcessingService:
             results["geopolitical"] = {"error": str(e)}
 
         # Generate summary
-        summary = self._generate_summary(results, context)
+        summary = self._generate_summary(results, context, contract_analysis)
 
-        return {
+        response = {
             "agent_results": results,
             "summary": summary,
             "document_context": context
         }
+
+        # Include contract analysis if available
+        if contract_analysis:
+            response["contract_analysis"] = contract_analysis
+
+        return response
 
     def _infer_document_type(self, filename: str, text_content: str) -> str:
         """Infer document type from filename and content."""
@@ -215,10 +231,11 @@ class DocumentProcessingService:
     def _generate_summary(
         self,
         results: Dict[str, Any],
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        contract_analysis: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Generate overall summary from agent results."""
-        # Calculate average risk score
+        """Generate overall summary from agent results and contract analysis."""
+        # Calculate average risk score from AI agents
         risk_scores = []
         for agent_name, result in results.items():
             if isinstance(result, dict) and "risk_score" in result:
@@ -226,17 +243,34 @@ class DocumentProcessingService:
 
         avg_risk = sum(risk_scores) / len(risk_scores) if risk_scores else 50
 
+        # If contract analysis is available, blend it with agent risk scores
+        if contract_analysis:
+            contract_risk = contract_analysis["overall_risk_score"]
+            # Weighted average: 60% contract terms, 40% AI agent analysis
+            avg_risk = (contract_risk * 0.6) + (avg_risk * 0.4)
+
         # Collect all findings
         all_findings = []
         for agent_name, result in results.items():
             if isinstance(result, dict) and "findings" in result:
                 all_findings.extend(result["findings"])
 
+        # Add contract-specific findings
+        if contract_analysis:
+            for term in contract_analysis.get("high_risk_terms", [])[:5]:
+                all_findings.append(
+                    f"HIGH RISK CONTRACT TERM: {term['term']} (Risk: {term['risk_score']}/10) - {term['rationale']}"
+                )
+
         # Collect all recommendations
         all_recommendations = []
         for agent_name, result in results.items():
             if isinstance(result, dict) and "recommendations" in result:
                 all_recommendations.extend(result["recommendations"])
+
+        # Add contract-specific recommendations
+        if contract_analysis:
+            all_recommendations.extend(contract_analysis.get("recommendations", []))
 
         # Determine overall recommendation
         if avg_risk < 40:

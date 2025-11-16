@@ -29,6 +29,7 @@ from src.db.models import (
     ContractOutcome, RiskCategory
 )
 from src.config import settings
+from src.services.contract_risk_matrix import ContractRiskMatrix
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,13 @@ class MLTrainingService:
                 "social_score": assessment.social_score,
                 "performance_score": assessment.performance_score,
             }
+
+            # Add contract term features if available in risk_flags
+            if contract.risk_flags and isinstance(contract.risk_flags, dict):
+                contract_features = contract.risk_flags.get("contract_terms", {})
+                for key, value in contract_features.items():
+                    if isinstance(value, (int, float)):
+                        features[key] = value
 
             # Define bad outcomes (what we want to predict/avoid)
             bad_outcomes = [
