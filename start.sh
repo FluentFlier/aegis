@@ -45,6 +45,19 @@ sleep 2
 # Create logs directory
 mkdir -p logs
 
+# Seed database if it doesn't exist
+echo -e "${BLUE}Checking database...${NC}"
+cd aegis-backend
+if [ ! -f "aegis.db" ]; then
+    echo -e "${YELLOW}Database not found. Creating and seeding...${NC}"
+    source venv/bin/activate
+    python -m src.db.seed
+    echo -e "${GREEN}✓ Database seeded with real data!${NC}"
+else
+    echo -e "${GREEN}✓ Database exists${NC}"
+fi
+cd ..
+
 # Start Backend
 echo -e "${BLUE}Starting Backend API...${NC}"
 cd aegis-backend
