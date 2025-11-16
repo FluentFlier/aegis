@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Screen, ChatMessage, AgentActivity } from './types';
-import { suppliers, allEvents, recommendations, initialChatMessages, agentActivities } from './data/mockData';
+import { Screen, ChatMessage, AgentActivity, Supplier } from './types';
+import { allEvents, recommendations, initialChatMessages } from './data/mockData';
+import { suppliersAPI, alertsAPI, agentsAPI } from './services/api';
 import { Onboarding, OnboardingProfile } from './components/screens/Onboarding';
 import { Login } from './components/screens/Login';
 import { Dashboard } from './components/screens/Dashboard';
@@ -37,6 +38,12 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<OnboardingProfile | null>(null);
   const [darkMode, setDarkMode] = useState(false);
 
+  // Real data from backend
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [agentActivities, setAgentActivities] = useState<AgentActivity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   // Apply dark mode class to document
   useEffect(() => {
     if (darkMode) {
@@ -45,6 +52,72 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
+
+  // Fetch data from backend
+  useEffect(() => {
+    const fetchData = async () => {
+      if (currentScreen === 'login' || currentScreen === 'onboarding') {
+        return; // Don't fetch data on login/onboarding screens
+      }
+
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Fetch suppliers with risk scores
+        const suppliersData = await suppliersAPI.getAll();
+
+        // Transform backend data to match frontend Supplier type
+        const transformedSuppliers: Supplier[] = suppliersData.map((s: any) => ({
+          id: String(s.id),
+          name: s.name,
+          riskScore: s.latest_risk_score || 0,
+          status: s.status.toLowerCase() as any,
+          region: s.region || 'Unknown',
+          category: s.category || 'Uncategorized',
+          trends: {
+            riskScore: s.risk_trend || 0,
+            delivery: 0,
+            quality: 0,
+          },
+          contracts: s.total_contracts || 0,
+          lastActivity: s.updated_at || s.created_at,
+        }));
+        setSuppliers(transformedSuppliers);
+
+        // Fetch agent activities (limit to recent 10)
+        const activitiesData = await agentsAPI.getActivity({ limit: 10 });
+
+        // Transform backend data to match frontend AgentActivity type
+        const transformedActivities: AgentActivity[] = activitiesData.map((a: any) => ({
+          id: String(a.id),
+          agent: a.agent_type,
+          action: a.activity_type,
+          supplierId: String(a.supplier_id),
+          supplierName: a.supplier_name || 'Unknown Supplier',
+          timestamp: a.created_at,
+          status: a.status,
+          confidence: a.confidence_score,
+        }));
+        setAgentActivities(transformedActivities);
+
+        toast.success('Data loaded from backend');
+      } catch (err: any) {
+        console.error('Error fetching data:', err);
+        setError(err.message || 'Failed to fetch data from backend');
+        toast.error('Failed to load data from backend. Using demo mode.');
+
+        // Fallback to mock data on error
+        const { suppliers: mockSuppliers, agentActivities: mockActivities } = await import('./data/mockData');
+        setSuppliers(mockSuppliers);
+        setAgentActivities(mockActivities);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [currentScreen]);
 
   const handleOnboardingComplete = (profile: OnboardingProfile) => {
     setUserProfile(profile);
@@ -144,6 +217,19 @@ export default function App() {
   };
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
+
+  // Show loading screen
+  if (isLoading && currentScreen !== 'login' && currentScreen !== 'onboarding') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#F9FBFC] to-[#FFFFFF] dark:from-[#0F1419] dark:to-[#1F2D3D] flex items-center justify-center">
+        <div className="text-center">
+          <Shield className="w-16 h-16 text-[#2EB8A9] mx-auto mb-4 animate-pulse" />
+          <h2 className="text-2xl font-semibold text-[#1F2D3D] dark:text-white mb-2">Loading Aegis</h2>
+          <p className="text-gray-600 dark:text-gray-400">Fetching supplier data...</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleEventClick = (supplierId?: string) => {
     if (supplierId) {
