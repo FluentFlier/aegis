@@ -262,6 +262,81 @@ def seed_risk_assessments(db: Session, suppliers: list, risk_matrix: RiskMatrixV
     return assessments
 
 
+def seed_contract_risk_assessments(db: Session, contracts: list, risk_matrix: RiskMatrixVersion):
+    """Create risk assessments linked to contracts for ML training."""
+    print("Creating contract risk assessments for ML training...")
+
+    assessments = []
+
+    for contract in contracts:
+        # Generate risk scores based on contract outcome
+        # Bad outcomes should have higher risk scores
+        if contract.outcome in ["TERMINATED_EARLY", "DISPUTE", "PENALTY"]:
+            base_score = random.uniform(60, 90)  # High risk
+        elif contract.outcome in ["SUCCESSFUL", "RENEWED"]:
+            base_score = random.uniform(15, 40)  # Low risk
+        else:
+            base_score = random.uniform(40, 60)  # Medium risk
+
+        # Generate correlated risk scores
+        financial_score = max(0, min(100, base_score + random.uniform(-10, 10)))
+        legal_score = max(0, min(100, base_score + random.uniform(-15, 15)))
+        esg_score = max(0, min(100, base_score + random.uniform(-12, 12)))
+        geopolitical_score = max(0, min(100, base_score + random.uniform(-8, 8)))
+        operational_score = max(0, min(100, base_score + random.uniform(-10, 10)))
+        pricing_score = max(0, min(100, base_score + random.uniform(-5, 5)))
+        social_score = max(0, min(100, base_score + random.uniform(-10, 10)))
+        performance_score = max(0, min(100, base_score + random.uniform(-12, 12)))
+
+        # Calculate composite score
+        composite_score = (
+            financial_score * risk_matrix.financial_weight +
+            legal_score * risk_matrix.legal_weight +
+            esg_score * risk_matrix.esg_weight +
+            geopolitical_score * risk_matrix.geopolitical_weight +
+            operational_score * risk_matrix.operational_weight +
+            pricing_score * risk_matrix.pricing_weight +
+            social_score * risk_matrix.social_weight +
+            performance_score * risk_matrix.performance_weight
+        )
+
+        # Determine recommendation
+        if composite_score < 40:
+            recommendation = "Proceed"
+        elif composite_score < 70:
+            recommendation = "Negotiate"
+        else:
+            recommendation = "Replace"
+
+        assessment = RiskAssessment(
+            supplier_id=contract.supplier_id,
+            contract_id=contract.id,  # Link to contract for ML training
+            financial_score=financial_score,
+            legal_score=legal_score,
+            esg_score=esg_score,
+            geopolitical_score=geopolitical_score,
+            operational_score=operational_score,
+            pricing_score=pricing_score,
+            social_score=social_score,
+            performance_score=performance_score,
+            composite_score=composite_score,
+            confidence_level=random.uniform(0.7, 0.95),
+            risk_matrix_version=risk_matrix.version,
+            assessed_at=contract.signed_date + timedelta(days=random.randint(1, 30)),
+            recommendation=recommendation,
+            recommendation_rationale=f"Contract assessment for {contract.contract_number}",
+            risk_factors={"contract_value": float(contract.contract_value), "outcome": str(contract.outcome)}
+        )
+
+        db.add(assessment)
+        assessments.append(assessment)
+
+    db.commit()
+    print(f"✓ Created {len(assessments)} contract risk assessments")
+
+    return assessments
+
+
 def seed_alerts(db: Session, suppliers: list):
     """Create sample alerts."""
     print("Creating sample alerts...")
@@ -333,6 +408,7 @@ def seed_database():
         suppliers = seed_suppliers(db)
         contracts = seed_contracts(db, suppliers)
         assessments = seed_risk_assessments(db, suppliers, risk_matrix)
+        contract_assessments = seed_contract_risk_assessments(db, contracts, risk_matrix)
         alerts = seed_alerts(db, suppliers)
 
         print("\n" + "=" * 60)
@@ -342,7 +418,8 @@ def seed_database():
         print(f"  - 1 risk matrix version")
         print(f"  - {len(suppliers)} suppliers")
         print(f"  - {len(contracts)} contracts")
-        print(f"  - {len(assessments)} risk assessments")
+        print(f"  - {len(assessments)} supplier risk assessments")
+        print(f"  - {len(contract_assessments)} contract risk assessments (for ML)")
         print(f"  - {len(alerts)} alerts")
         print("\nYou can now:")
         print("  1. Start the backend: uvicorn src.main:app --reload")
