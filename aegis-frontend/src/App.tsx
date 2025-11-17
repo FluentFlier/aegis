@@ -41,7 +41,7 @@ export default function App() {
   // Real data from backend
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [agentActivities, setAgentActivities] = useState<AgentActivity[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Apply dark mode class to document
@@ -60,57 +60,70 @@ export default function App() {
         return; // Don't fetch data on login/onboarding screens
       }
 
+      // Load mock data first as fallback
+      const { suppliers: mockSuppliers, agentActivities: mockActivities } = await import('./data/mockData');
+
       try {
         setIsLoading(true);
         setError(null);
 
-        // Fetch suppliers with risk scores
-        const suppliersData = await suppliersAPI.getAll();
+        // Try to fetch from backend with timeout
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Backend request timeout')), 5000)
+        );
 
-        // Transform backend data to match frontend Supplier type
-        const transformedSuppliers: Supplier[] = suppliersData.map((s: any) => ({
-          id: String(s.id),
-          name: s.name,
-          riskScore: s.latest_risk_score || 0,
-          status: s.status.toLowerCase() as any,
-          region: s.region || 'Unknown',
-          category: s.category || 'Uncategorized',
-          trends: {
-            riskScore: s.risk_trend || 0,
-            delivery: 0,
-            quality: 0,
-          },
-          contracts: s.total_contracts || 0,
-          lastActivity: s.updated_at || s.created_at,
-        }));
-        setSuppliers(transformedSuppliers);
+        const fetchPromise = (async () => {
+          // Fetch suppliers with risk scores
+          const suppliersData = await suppliersAPI.getAll();
 
-        // Fetch agent activities (limit to recent 10)
-        const activitiesData = await agentsAPI.getActivity({ limit: 10 });
+          // Transform backend data to match frontend Supplier type
+          const transformedSuppliers: Supplier[] = suppliersData.map((s: any) => ({
+            id: String(s.id),
+            name: s.name,
+            riskScore: s.latest_risk_score || 0,
+            status: s.status.toLowerCase() as any,
+            region: s.region || 'Unknown',
+            category: s.category || 'Uncategorized',
+            trends: {
+              riskScore: s.risk_trend || 0,
+              delivery: 0,
+              quality: 0,
+            },
+            contracts: s.total_contracts || 0,
+            lastActivity: s.updated_at || s.created_at,
+          }));
 
-        // Transform backend data to match frontend AgentActivity type
-        const transformedActivities: AgentActivity[] = activitiesData.map((a: any) => ({
-          id: String(a.id),
-          agent: a.agent_type,
-          action: a.activity_type,
-          supplierId: String(a.supplier_id),
-          supplierName: a.supplier_name || 'Unknown Supplier',
-          timestamp: a.created_at,
-          status: a.status,
-          confidence: a.confidence_score,
-        }));
-        setAgentActivities(transformedActivities);
+          // Fetch agent activities (limit to recent 10)
+          const activitiesData = await agentsAPI.getActivity({ limit: 10 });
 
-        toast.success('Data loaded from backend');
+          // Transform backend data to match frontend AgentActivity type
+          const transformedActivities: AgentActivity[] = activitiesData.map((a: any) => ({
+            id: String(a.id),
+            agent: a.agent_type,
+            action: a.activity_type,
+            supplierId: String(a.supplier_id),
+            supplierName: a.supplier_name || 'Unknown Supplier',
+            timestamp: a.created_at,
+            status: a.status,
+            confidence: a.confidence_score,
+          }));
+
+          return { suppliers: transformedSuppliers, activities: transformedActivities };
+        })();
+
+        const result = await Promise.race([fetchPromise, timeoutPromise]) as any;
+
+        setSuppliers(result.suppliers);
+        setAgentActivities(result.activities);
+        toast.success('Connected to backend');
       } catch (err: any) {
-        console.error('Error fetching data:', err);
-        setError(err.message || 'Failed to fetch data from backend');
-        toast.error('Failed to load data from backend. Using demo mode.');
+        console.error('Backend unavailable, using demo data:', err);
+        setError(err.message || 'Backend unavailable');
 
-        // Fallback to mock data on error
-        const { suppliers: mockSuppliers, agentActivities: mockActivities } = await import('./data/mockData');
+        // Use mock data on error
         setSuppliers(mockSuppliers);
         setAgentActivities(mockActivities);
+        toast.info('Running in demo mode - backend unavailable');
       } finally {
         setIsLoading(false);
       }
