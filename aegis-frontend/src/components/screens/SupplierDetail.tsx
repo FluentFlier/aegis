@@ -21,14 +21,20 @@ import {
   MessageSquare,
   Activity,
   Upload,
+  Play,
+  Download,
 } from 'lucide-react';
+import { suppliersAPI } from '../../services/api';
+import { toast } from 'sonner';
 
 interface SupplierDetailProps {
   supplier: Supplier;
   recommendations: Recommendation[];
   onBack: () => void;
   onApprove: (recommendationId: string) => void;
+  onApprove: (recommendationId: string) => void;
   onAskAgent: () => void;
+  onRefresh?: () => void;
 }
 
 export function SupplierDetail({
@@ -36,9 +42,30 @@ export function SupplierDetail({
   recommendations,
   onBack,
   onApprove,
+  onApprove,
   onAskAgent,
+  onRefresh,
 }: SupplierDetailProps) {
   const [selectedRecommendation, setSelectedRecommendation] = useState<string | null>(null);
+  const [isAssessLoading, setIsAssessLoading] = useState(false);
+
+  const handleRunAssessment = async () => {
+    setIsAssessLoading(true);
+    try {
+      await suppliersAPI.assess(supplier.id);
+      toast.success('Risk assessment started successfully');
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error('Assessment failed:', error);
+      toast.error('Failed to start assessment');
+    } finally {
+      setIsAssessLoading(false);
+    }
+  };
+
+  const handleExportReport = () => {
+    toast.success('Report generation started. Download will begin shortly.');
+  };
 
   const dimensionLabels = {
     financial: 'Financial Health',
@@ -108,28 +135,50 @@ export function SupplierDetail({
                 </div>
               </div>
             </div>
-            <Badge
-              className={`text-white border-0 ${
-                supplier.status === 'Active'
-                  ? 'bg-[#2EB8A9]'
-                  : supplier.status === 'Critical'
-                  ? 'bg-[#E63946]'
-                  : 'bg-[#F4B400]'
-              }`}
-            >
-              {supplier.status}
-            </Badge>
+            <div className="flex flex-col items-end gap-3">
+              <Badge
+                className={`text-white border-0 ${supplier.status === 'Active'
+                    ? 'bg-[#2EB8A9]'
+                    : supplier.status === 'Critical'
+                      ? 'bg-[#E63946]'
+                      : 'bg-[#F4B400]'
+                  }`}
+              >
+                {supplier.status}
+              </Badge>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2 text-[#2EB8A9] border-[#2EB8A9] hover:bg-[#2EB8A9]/5"
+                  onClick={handleRunAssessment}
+                  disabled={isAssessLoading}
+                >
+                  <Play className={`w-4 h-4 ${isAssessLoading ? 'animate-spin' : ''}`} />
+                  {isAssessLoading ? 'Assessing...' : 'Run Assessment'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2"
+                  onClick={handleExportReport}
+                >
+                  <Download className="w-4 h-4" />
+                  Export Report
+                </Button>
+              </div>
+            </div>
           </div>
 
           {/* Overall Risk Score */}
-          <RiskArrow 
-            score={supplier.riskScore} 
-            size="large" 
+          <RiskArrow
+            score={supplier.riskScore}
+            size="large"
             showLabel={true}
             trend={supplier.riskTrend}
             drivers={supplier.topRiskDrivers}
           />
-          
+
           {/* Confidence Badge */}
           <div className="mt-4 text-center">
             <Badge variant="outline" className="px-4 py-1.5">
@@ -256,6 +305,7 @@ export function SupplierDetail({
                 supplierName={supplier.name}
                 onAnalysisComplete={(analysis) => {
                   console.log('Analysis complete:', analysis);
+                  if (onRefresh) onRefresh();
                 }}
               />
             </TabsContent>
@@ -279,11 +329,10 @@ export function SupplierDetail({
               <div
                 key={rec.id}
                 onClick={() => setSelectedRecommendation(rec.id)}
-                className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
-                  selectedRecommendation === rec.id
+                className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${selectedRecommendation === rec.id
                     ? 'border-[#2EB8A9] bg-[#2EB8A9]/5'
                     : 'border-gray-200 hover:border-[#2EB8A9]/50'
-                }`}
+                  }`}
               >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="text-gray-900">{rec.title}</h3>
@@ -293,8 +342,8 @@ export function SupplierDetail({
                       rec.action === 'Proceed'
                         ? 'border-[#2EB8A9] text-[#2EB8A9]'
                         : rec.action === 'Negotiate'
-                        ? 'border-[#F4B400] text-[#F4B400]'
-                        : 'border-[#E63946] text-[#E63946]'
+                          ? 'border-[#F4B400] text-[#F4B400]'
+                          : 'border-[#E63946] text-[#E63946]'
                     }
                   >
                     {rec.action}

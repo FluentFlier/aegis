@@ -8,7 +8,10 @@ import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import logging
-import google.generativeai as genai
+import google.generativeai as genai  # Keep import but we won't use it directly, actually better to remove if not needed.
+# For now, let's remove it and use httpx/requests for Ollama or the ollama library
+import requests
+import json
 from sqlalchemy.orm import Session
 
 from src.db.models import Supplier, Contract, AgentActivity, AgentType
@@ -17,11 +20,39 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini
-if settings.GOOGLE_API_KEY:
-    genai.configure(api_key=settings.GOOGLE_API_KEY)
-else:
-    logger.warning("GOOGLE_API_KEY not set. Agent functionality will be limited.")
+# Ollama Configuration
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+
+class OllamaClient:
+    """Client for interacting with Ollama."""
+    
+    def __init__(self, base_url: str = OLLAMA_BASE_URL, model: str = OLLAMA_MODEL):
+        self.base_url = base_url
+        self.model = model
+
+    def generate_content(self, prompt: str) -> 'OllamaResponse':
+        """Generate content using Ollama."""
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json" # Request JSON schema if possible or just expect JSON
+                },
+                timeout=60
+            )
+            response.raise_for_status()
+            return OllamaResponse(response.json().get("response", ""))
+        except Exception as e:
+            logger.error(f"Ollama generation error: {e}")
+            raise
+
+class OllamaResponse:
+    def __init__(self, text: str):
+        self.text = text
 
 
 class BaseAgent:
@@ -30,7 +61,8 @@ class BaseAgent:
     def __init__(self, agent_type: AgentType, db: Session):
         self.agent_type = agent_type
         self.db = db
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
+        # self.model = genai.GenerativeModel("gemini-1.5-flash") # REMOVED
+        self.model = OllamaClient() # Use Ollama client
 
     async def analyze(
         self,
@@ -225,6 +257,10 @@ Respond in JSON format:
                 "risk_factors": {}
             }
 
+#Hippa, Rules, Labor Laws, Compliance
+#Make a seperate ComplianceAgent with regarrds to above stuff
+#Legal: Limit to court cases
+#Brand and Reputation along with Social can be clubbed together
 
 class LegalAgent(BaseAgent):
     """Analyzes legal compliance, contract risks, and regulatory issues."""
@@ -669,45 +705,80 @@ class OperationalAgent(BaseAgent):
         contract: Optional[Contract] = None,
         additional_context: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Analyze operational risk using rules and heuristics."""
+        """Analyze operational risk."""
 
-        # Simple heuristic-based scoring
-        risk_score = 30.0  # Base score
+        prompt = f"""
+You are an operational risk analyst. Analyze this supplier:
 
-        # Adjust based on region (example heuristic)
-        high_risk_regions = ["Asia-Pacific", "Middle East", "Africa"]
-        if supplier.region in high_risk_regions:
-            risk_score += 15.0
+Supplier: {supplier.name}
+Region: {supplier.region}
+Country: {supplier.country}
+Category: {supplier.category}
+Annual Volume: ${supplier.annual_volume:,.2f} if supplier.annual_volume else 'N/A'
 
-        # Adjust based on volume
-        if supplier.annual_volume and supplier.annual_volume > 1000000:
-            risk_score -= 5.0  # Lower risk for high-volume suppliers
+Assess operational risks:
+1. **Delivery Reliability**: History of delays, on-time performance
+2. **Capacity**: Ability to meet demand, scalability
+3. **Quality Control**: manufacturing defects, quality assurance processes
+4. **Supply Chain Resilience**: Single points of failure, backup options
 
-        result = {
-            "risk_score": min(100.0, max(0.0, risk_score)),
-            "confidence": 0.7,
-            "findings": [
-                f"Supplier located in {supplier.region}",
-                f"Annual volume: ${supplier.annual_volume:,.2f}" if supplier.annual_volume else "Volume data not available"
-            ],
-            "recommendations": [
-                "Monitor delivery performance",
-                "Establish backup suppliers"
-            ],
-            "risk_factors": {
-                "delivery_reliability": "good" if risk_score < 40 else "moderate",
-                "capacity": "sufficient" if supplier.annual_volume and supplier.annual_volume > 500000 else "limited"
+Provide a risk score from 0-100 (0=no risk, 100=extreme risk).
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "delivery_reliability": "high/moderate/low",
+        "capacity_risk": "high/moderate/low",
+        "quality_control": "strong/moderate/weak"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Operational analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Operational agent error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Analysis failed: {str(e)}"],
+                "recommendations": ["Conduct manual operational review"],
+                "risk_factors": {}
             }
-        }
 
-        self._log_activity(
-            supplier_id=supplier.id,
-            task_description=f"Operational analysis for {supplier.name}",
-            result=result,
-            status="completed"
-        )
+    def _parse_gemini_response(self, text: str) -> Dict:
+        import json
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
 
-        return result
+
 
 
 class PricingAgent(BaseAgent):
@@ -724,40 +795,76 @@ class PricingAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """Analyze pricing risk."""
 
-        risk_score = 25.0  # Base score for pricing
+        prompt = f"""
+You are a pricing analyst. Analyze this supplier:
 
-        # Contract-based adjustments
-        if contract and contract.contract_value:
-            if contract.contract_value > 5000000:
-                risk_score += 10.0  # Higher risk for large contracts
+Supplier: {supplier.name}
+Category: {supplier.category}
+Contract Value: ${contract.contract_value:,.2f} if contract and contract.contract_value else 'N/A'
 
-        result = {
-            "risk_score": min(100.0, risk_score),
-            "confidence": 0.6,
-            "findings": [
-                f"Contract value: ${contract.contract_value:,.2f}" if contract and contract.contract_value else "No contract value available",
-                "Pricing appears competitive based on market analysis"
-            ],
-            "recommendations": [
-                "Monitor market pricing trends",
-                "Negotiate volume discounts"
-            ],
-            "risk_factors": {
-                "competitiveness": "competitive",
-                "volatility": "moderate"
+Assess pricing risks:
+1. **Competitiveness**: Comparison to market rates
+2. **Cost Volatility**: Risk of price increases
+3. **Transparency**: Clarity of cost structure
+4. **Value for Money**: ROI, total cost of ownership
+
+Provide a risk score from 0-100 (0=excellent pricing, 100=high risk/poor value).
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "competitiveness": "high/moderate/low",
+        "volatility": "high/moderate/low",
+        "transparency": "good/moderate/poor"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Pricing analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Pricing agent error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Analysis failed: {str(e)}"],
+                "recommendations": ["Conduct manual pricing review"],
+                "risk_factors": {}
             }
-        }
 
-        self._log_activity(
-            supplier_id=supplier.id,
-            task_description=f"Pricing analysis for {supplier.name}",
-            result=result,
-            status="completed"
-        )
+    def _parse_gemini_response(self, text: str) -> Dict:
+        import json
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
 
-        return result
-
-
+#operational_agent.py can be ocmbined with performance_agent.py. 
 class SocialAgent(BaseAgent):
     """Analyzes social responsibility and community impact."""
 
@@ -772,33 +879,167 @@ class SocialAgent(BaseAgent):
     ) -> Dict[str, Any]:
         """Analyze social risk."""
 
-        risk_score = 20.0
+        prompt = f"""
+You are a social responsibility analyst. Analyze this supplier:
 
-        result = {
-            "risk_score": risk_score,
-            "confidence": 0.65,
-            "findings": [
-                "No major social responsibility concerns identified",
-                "Labor practices appear compliant"
-            ],
-            "recommendations": [
-                "Conduct periodic social audits",
-                "Review labor policies annually"
-            ],
-            "risk_factors": {
-                "labor_practices": "compliant",
-                "community_impact": "positive"
+Supplier: {supplier.name}
+Region: {supplier.region}
+Country: {supplier.country}
+
+Assess social risks:
+1. **Labor Practices**: Wages, working conditions, child labor
+2. **Community Impact**: Local community relations
+3. **Human Rights**: Supply chain transparency, fair treatment
+4. **Diversity & Inclusion**: Hiring practices
+
+Provide a risk score from 0-100 (0=excellent social responsibility, 100=high risk).
+
+Respond in JSON format:
+{{
+    "risk_score": <0-100>,
+    "confidence": <0-1>,
+    "findings": ["finding 1", "finding 2", ...],
+    "recommendations": ["recommendation 1", "recommendation 2", ...],
+    "risk_factors": {{
+        "labor_practices": "good/moderate/poor",
+        "community_impact": "positive/neutral/negative",
+        "human_rights": "good/concern"
+    }}
+}}
+"""
+
+        try:
+            response = self.model.generate_content(prompt)
+            result = self._parse_gemini_response(response.text)
+
+            self._log_activity(
+                supplier_id=supplier.id,
+                task_description=f"Social responsibility analysis for {supplier.name}",
+                result=result,
+                status="completed"
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Social agent error: {str(e)}")
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.3,
+                "findings": [f"Analysis failed: {str(e)}"],
+                "recommendations": [],
+                "risk_factors": {}
             }
-        }
 
-        self._log_activity(
-            supplier_id=supplier.id,
-            task_description=f"Social responsibility analysis for {supplier.name}",
-            result=result,
-            status="completed"
-        )
+    def _parse_gemini_response(self, text: str) -> Dict:
+        import json
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return {
+                "risk_score": 50.0,
+                "confidence": 0.5,
+                "findings": [text[:500]],
+                "recommendations": [],
+                "risk_factors": {}
+            }
 
-        return result
+
+
+class ChatAgent:
+    """Handles conversational interactions with the user."""
+
+    def __init__(self, db: Session):
+        self.db = db
+        self.model = OllamaClient() # Use Ollama
+
+    async def chat(self, message: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        Process a chat message and return a response.
+        """
+        # Fetch high-level context
+        supplier_count = self.db.query(Supplier).count()
+        
+        # Determine if the user is asking about a specific supplier
+        relevant_supplier = None
+        suppliers = self.db.query(Supplier).all()
+        for s in suppliers:
+             if s.name.lower() in message.lower():
+                 relevant_supplier = s
+                 break
+        
+        context_str = f"""
+You are Aegis, an AI Supply Chain Risk Assistant.
+Context:
+- There are {supplier_count} active suppliers in the portfolio.
+"""
+        
+        if relevant_supplier:
+            context_str += f"""
+User is asking about supplier: {relevant_supplier.name}
+- Region: {relevant_supplier.region}
+- Country: {relevant_supplier.country}
+- Category: {relevant_supplier.category}
+- Annual Volume: ${relevant_supplier.annual_volume:,.2f}
+- Status: {relevant_supplier.status.value}
+"""
+
+        prompt = f"""
+{context_str}
+
+User Message: "{message}"
+
+Respond helpfully and professionally. If you are recommending an action, suggest it.
+If the user asks to analyze a supplier, say you can start an assessment.
+Keep the response concise (under 3 sentences unless complex).
+
+Also provide 3 "quick_replies" that the user might want to say next.
+
+Respond in JSON format:
+{{
+    "response": "text response...",
+    "quick_replies": ["reply 1", "reply 2", "reply 3"]
+}}
+"""
+        try:
+            response = self.model.generate_content(prompt)
+            # Ollama might return just the JSON string, parse it
+            return self._parse_gemini_response(response.text)
+        except Exception as e:
+            logger.error(f"Chat agent error: {str(e)}")
+            return {
+                "response": "I'm having trouble connecting to my local AI brain right now. Make sure Ollama is running.",
+                "quick_replies": []
+            }
+
+    def _parse_gemini_response(self, text: str) -> Dict:
+        import json
+        import re
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+        try:
+            # If Ollama returns raw JSON without markdown, this might fail or succeed depending on logic
+            # Cleaning up potentially
+            text = text.strip()
+            if text.startswith('```json'):
+                 text = text[7:]
+            if text.endswith('```'):
+                 text = text[:-3]
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Try to just load it directly if regex failed
+            try:
+                return json.loads(text)
+            except:
+                return {
+                    "response": text,
+                    "quick_replies": []
+                }
 
 
 class PerformanceAgent(BaseAgent):
@@ -870,6 +1111,11 @@ class AegisOrchestrator:
             "social": SocialAgent(db),
             "performance": PerformanceAgent(db),
         }
+        self.chat_agent = ChatAgent(db)
+
+    async def chat(self, message: str, context: Optional[Dict] = None) -> Dict:
+        """Route chat request to ChatAgent."""
+        return await self.chat_agent.chat(message, context)
 
     async def run_full_assessment(
         self,

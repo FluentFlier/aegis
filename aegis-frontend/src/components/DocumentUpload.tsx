@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { suppliersAPI } from '../services/api';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Badge } from './ui/badge';
@@ -117,20 +118,8 @@ export function DocumentUpload({ supplierId, supplierName, onAnalysisComplete }:
     formData.append('file', file);
 
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      const response = await fetch(
-        `${apiUrl}/api/suppliers/${supplierId}/upload-document`,
-        {
-          method: 'POST',
-          body: formData,
-        }
-      );
+      const result = await suppliersAPI.uploadDocument(Number(supplierId), file);
 
-      if (!response.ok) {
-        throw new Error('Upload failed');
-      }
-
-      const result: ContractAnalysis = await response.json();
       setAnalysis(result);
       toast.success('Document analyzed successfully!');
       onAnalysisComplete?.(result);
@@ -195,11 +184,10 @@ export function DocumentUpload({ supplierId, supplierName, onAnalysisComplete }:
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                dragActive
-                  ? 'border-[#2EB8A9] bg-[#2EB8A9]/5'
-                  : 'border-gray-300 hover:border-gray-400'
-              }`}
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${dragActive
+                ? 'border-[#2EB8A9] bg-[#2EB8A9]/5'
+                : 'border-gray-300 hover:border-gray-400'
+                }`}
             >
               {file ? (
                 <div className="space-y-4">

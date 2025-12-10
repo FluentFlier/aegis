@@ -7,6 +7,7 @@ import { AgentActivityFeed } from '../AgentActivityFeed';
 import { AlertTicker } from '../AlertTicker';
 import { ProcurementHealth } from '../ProcurementHealth';
 import { GeoMapView } from '../GeoMapView';
+import { AddSupplierModal } from '../AddSupplierModal';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -25,6 +26,7 @@ import {
   Filter,
   RefreshCw,
   Clock,
+  Plus,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -37,6 +39,8 @@ interface DashboardProps {
   onActivityClick: (activity: AgentActivity) => void;
   events: Event[];
   onAlertTickerClick: () => void;
+  isChatLoading?: boolean;
+  onRefresh?: () => void;
 }
 
 export function Dashboard({
@@ -49,29 +53,18 @@ export function Dashboard({
   onActivityClick,
   events,
   onAlertTickerClick,
+  isChatLoading,
+  onRefresh,
 }: DashboardProps) {
   const [showChat, setShowChat] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [riskFilter, setRiskFilter] = useState<string>('all');
   const [regionFilter, setRegionFilter] = useState<string>('all');
   const [currentView, setCurrentView] = useState<'grid' | 'map'>('grid');
-  const [syncCountdown, setSyncCountdown] = useState(750); // 12m 30s in seconds
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-  // Sync countdown timer
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSyncCountdown((prev) => {
-        if (prev <= 1) {
-          setIsSyncing(true);
-          setTimeout(() => setIsSyncing(false), 2000);
-          return 750; // Reset to 12.5 minutes
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  // Removed fake sync timer logic
 
   const formatCountdown = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -87,6 +80,14 @@ export function Dashboard({
   };
 
   const userName = 'Executive'; // Could be from user profile
+
+  const handleRefresh = async () => {
+    if (onRefresh) {
+      setIsSyncing(true);
+      await onRefresh();
+      setIsSyncing(false);
+    }
+  };
 
   // Calculate portfolio metrics
   const activeSuppliers = suppliers.filter((s) => s.status === 'Active').length;
@@ -113,12 +114,12 @@ export function Dashboard({
   // Filter suppliers
   const filteredSuppliers = suppliers.filter((s) => {
     const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          s.category.toLowerCase().includes(searchQuery.toLowerCase());
+      s.category.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesRisk = riskFilter === 'all' ||
-                       (riskFilter === 'low' && s.riskScore <= 40) ||
-                       (riskFilter === 'moderate' && s.riskScore > 40 && s.riskScore <= 60) ||
-                       (riskFilter === 'elevated' && s.riskScore > 60 && s.riskScore <= 80) ||
-                       (riskFilter === 'high' && s.riskScore > 80);
+      (riskFilter === 'low' && s.riskScore <= 40) ||
+      (riskFilter === 'moderate' && s.riskScore > 40 && s.riskScore <= 60) ||
+      (riskFilter === 'elevated' && s.riskScore > 60 && s.riskScore <= 80) ||
+      (riskFilter === 'high' && s.riskScore > 80);
     const matchesRegion = regionFilter === 'all' || s.region === regionFilter;
     return matchesSearch && matchesRisk && matchesRegion;
   });
@@ -129,7 +130,7 @@ export function Dashboard({
     <div className="min-h-screen bg-transparent">
       {/* Alert Ticker */}
       <AlertTicker events={events} onAlertClick={onAlertTickerClick} />
-      
+
       <div className="p-6">
         <div className="max-w-7xl mx-auto space-y-6">
           {/* Header */}
@@ -156,16 +157,26 @@ export function Dashboard({
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <Button
+                variant="default"
+                onClick={() => setIsAddModalOpen(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Supplier
+              </Button>
+
               <motion.div
-                animate={isSyncing ? { rotate: 360 } : {}}
+                animate={{}}
                 transition={{ duration: 1 }}
               >
                 <Badge
                   variant="outline"
-                  className={`px-3 py-1.5 ${isSyncing ? 'border-[#2EB8A9] bg-[#2EB8A9]/10' : ''}`}
+                  className={`px-3 py-1.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors`}
+                  onClick={handleRefresh}
                 >
-                  <RefreshCw className={`w-3 h-3 mr-2 ${isSyncing ? 'text-[#2EB8A9]' : 'text-gray-500'}`} />
-                  {isSyncing ? 'Syncing...' : `Next sync in ${formatCountdown(syncCountdown)}`}
+                  <RefreshCw className={`w-3 h-3 mr-2 text-gray-500 ${isSyncing ? 'animate-spin' : ''}`} />
+                  {isSyncing ? 'Syncing...' : 'Sync Now'}
                 </Badge>
               </motion.div>
               <Badge variant="outline" className="px-3 py-1.5">
@@ -195,10 +206,10 @@ export function Dashboard({
           >
             <Card className="p-6 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card shadow-lg hover:shadow-xl transition-shadow">
               <h2 className="text-gray-900 dark:text-white mb-4">Portfolio Risk Score</h2>
-              <RiskArrow 
-                score={avgRiskScore} 
-                size="large" 
-                showLabel={true} 
+              <RiskArrow
+                score={avgRiskScore}
+                size="large"
+                showLabel={true}
                 trend={avgRiskTrend}
                 drivers={['Legal exposure (Apex)', 'Geo-political risks', 'Price volatility']}
               />
@@ -207,97 +218,97 @@ export function Dashboard({
 
           {/* Quick Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-          >
-            <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#2EB8A9]/10 dark:bg-[#2EB8A9]/20 flex items-center justify-center group-hover:bg-[#2EB8A9]/20 transition-colors">
-                  <Building2 className="w-5 h-5 text-[#2EB8A9]" />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.15 }}
+            >
+              <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-[#2EB8A9]/10 dark:bg-[#2EB8A9]/20 flex items-center justify-center group-hover:bg-[#2EB8A9]/20 transition-colors">
+                    <Building2 className="w-5 h-5 text-[#2EB8A9]" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Active Suppliers</p>
+                    <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{activeSuppliers}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Active Suppliers</p>
-                  <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{activeSuppliers}</p>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+              </Card>
+            </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#F4B400]/10 dark:bg-[#F4B400]/20 flex items-center justify-center group-hover:bg-[#F4B400]/20 transition-colors">
-                  <TrendingUp className="w-5 h-5 text-[#F4B400]" />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-[#F4B400]/10 dark:bg-[#F4B400]/20 flex items-center justify-center group-hover:bg-[#F4B400]/20 transition-colors">
+                    <TrendingUp className="w-5 h-5 text-[#F4B400]" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Avg Risk Score</p>
+                    <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{avgRiskScore}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Avg Risk Score</p>
-                  <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{avgRiskScore}</p>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+              </Card>
+            </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-          >
-            <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#E63946]/10 dark:bg-[#E63946]/20 flex items-center justify-center group-hover:bg-[#E63946]/20 transition-colors">
-                  <AlertTriangle className="w-5 h-5 text-[#E63946]" />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+            >
+              <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-[#E63946]/10 dark:bg-[#E63946]/20 flex items-center justify-center group-hover:bg-[#E63946]/20 transition-colors">
+                    <AlertTriangle className="w-5 h-5 text-[#E63946]" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">High Risk</p>
+                    <p className="text-2xl text-gray-900 dark:text-white animate-count-up">
+                      {highRiskSuppliers}/{suppliers.length}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">High Risk</p>
-                  <p className="text-2xl text-gray-900 dark:text-white animate-count-up">
-                    {highRiskSuppliers}/{suppliers.length}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+              </Card>
+            </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#E63946]/10 dark:bg-[#E63946]/20 flex items-center justify-center group-hover:bg-[#E63946]/20 transition-colors">
-                  <AlertTriangle className="w-5 h-5 text-[#E63946]" />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-[#E63946]/10 dark:bg-[#E63946]/20 flex items-center justify-center group-hover:bg-[#E63946]/20 transition-colors">
+                    <AlertTriangle className="w-5 h-5 text-[#E63946]" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Critical Status</p>
+                    <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{criticalSuppliers}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Critical Status</p>
-                  <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{criticalSuppliers}</p>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+              </Card>
+            </motion.div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-          >
-            <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#F4B400]/10 dark:bg-[#F4B400]/20 flex items-center justify-center group-hover:bg-[#F4B400]/20 transition-colors">
-                  <FileText className="w-5 h-5 text-[#F4B400]" />
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.35 }}
+            >
+              <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card hover:shadow-lg hover:scale-105 transition-all cursor-pointer group">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-[#F4B400]/10 dark:bg-[#F4B400]/20 flex items-center justify-center group-hover:bg-[#F4B400]/20 transition-colors">
+                    <FileText className="w-5 h-5 text-[#F4B400]" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Pending Approval</p>
+                    <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{pendingContracts}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Pending Approval</p>
-                  <p className="text-2xl text-gray-900 dark:text-white animate-count-up">{pendingContracts}</p>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
+              </Card>
+            </motion.div>
 
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -361,55 +372,55 @@ export function Dashboard({
             transition={{ delay: 0.55 }}
           >
             <Card className="p-4 bg-white dark:bg-[#1F2D3D]/80 dark:border-white/10 glass-card">
-            <div className="flex flex-col lg:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <Input
-                    placeholder="Search suppliers..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10"
-                  />
+              <div className="flex flex-col lg:flex-row gap-4">
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      placeholder="Search suppliers..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-wrap items-center">
+                  <Filter className="w-4 h-4 text-gray-600" />
+                  <span className="text-sm text-gray-600">Risk:</span>
+                  {['all', 'low', 'moderate', 'elevated', 'high'].map((filter) => (
+                    <Button
+                      key={filter}
+                      variant={riskFilter === filter ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setRiskFilter(filter)}
+                      className={riskFilter === filter ? 'bg-[#2EB8A9] hover:bg-[#2EB8A9]/90' : ''}
+                    >
+                      {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                    </Button>
+                  ))}
+                  <span className="text-sm text-gray-600 ml-2">Region:</span>
+                  <Button
+                    variant={regionFilter === 'all' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setRegionFilter('all')}
+                    className={regionFilter === 'all' ? 'bg-[#2EB8A9] hover:bg-[#2EB8A9]/90' : ''}
+                  >
+                    All
+                  </Button>
+                  {regions.map((region) => (
+                    <Button
+                      key={region}
+                      variant={regionFilter === region ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setRegionFilter(region)}
+                      className={regionFilter === region ? 'bg-[#2EB8A9] hover:bg-[#2EB8A9]/90' : ''}
+                    >
+                      {region.split(' ')[0]}
+                    </Button>
+                  ))}
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap items-center">
-                <Filter className="w-4 h-4 text-gray-600" />
-                <span className="text-sm text-gray-600">Risk:</span>
-                {['all', 'low', 'moderate', 'elevated', 'high'].map((filter) => (
-                  <Button
-                    key={filter}
-                    variant={riskFilter === filter ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setRiskFilter(filter)}
-                    className={riskFilter === filter ? 'bg-[#2EB8A9] hover:bg-[#2EB8A9]/90' : ''}
-                  >
-                    {filter.charAt(0).toUpperCase() + filter.slice(1)}
-                  </Button>
-                ))}
-                <span className="text-sm text-gray-600 ml-2">Region:</span>
-                <Button
-                  variant={regionFilter === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setRegionFilter('all')}
-                  className={regionFilter === 'all' ? 'bg-[#2EB8A9] hover:bg-[#2EB8A9]/90' : ''}
-                >
-                  All
-                </Button>
-                {regions.map((region) => (
-                  <Button
-                    key={region}
-                    variant={regionFilter === region ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setRegionFilter(region)}
-                    className={regionFilter === region ? 'bg-[#2EB8A9] hover:bg-[#2EB8A9]/90' : ''}
-                  >
-                    {region.split(' ')[0]}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          </Card>
+            </Card>
           </motion.div>
 
           {/* Main Content Tabs */}
@@ -448,8 +459,8 @@ export function Dashboard({
 
                 {/* Agent Activity Feed - Takes 1 column */}
                 <div className="lg:col-span-1">
-                  <AgentActivityFeed 
-                    activities={agentActivities} 
+                  <AgentActivityFeed
+                    activities={agentActivities}
                     onActivityClick={onActivityClick}
                   />
                 </div>
@@ -462,8 +473,8 @@ export function Dashboard({
                   <ProcurementHealth suppliers={suppliers} />
                 </div>
                 <div className="lg:col-span-1">
-                  <AgentActivityFeed 
-                    activities={agentActivities} 
+                  <AgentActivityFeed
+                    activities={agentActivities}
                     onActivityClick={onActivityClick}
                   />
                 </div>
@@ -476,8 +487,8 @@ export function Dashboard({
                   <GeoMapView suppliers={suppliers} onSupplierClick={onSupplierClick} />
                 </div>
                 <div className="lg:col-span-1">
-                  <AgentActivityFeed 
-                    activities={agentActivities} 
+                  <AgentActivityFeed
+                    activities={agentActivities}
                     onActivityClick={onActivityClick}
                   />
                 </div>
@@ -495,9 +506,17 @@ export function Dashboard({
             onClose={() => setShowChat(false)}
             onSendMessage={onSendMessage}
             onQuickReply={onQuickReply}
+            isLoading={isChatLoading}
           />
         </div>
       )}
+
+      {/* Add Supplier Modal */}
+      <AddSupplierModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSupplierAdded={handleRefresh}
+      />
     </div>
   );
 }

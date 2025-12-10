@@ -32,7 +32,8 @@ type AppScreen = Screen | 'onboarding';
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('onboarding');
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(initialChatMessages);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [userProfile, setUserProfile] = useState<OnboardingProfile | null>(null);
@@ -54,83 +55,93 @@ export default function App() {
   }, [darkMode]);
 
   // Fetch data from backend
-  useEffect(() => {
-    const fetchData = async () => {
-      if (currentScreen === 'login' || currentScreen === 'onboarding') {
-        return; // Don't fetch data on login/onboarding screens
-      }
+  const refreshData = React.useCallback(async () => {
+    if (currentScreen === 'login' || currentScreen === 'onboarding') {
+      return;
+    }
 
-      // Load mock data first as fallback
-      const { suppliers: mockSuppliers, agentActivities: mockActivities } = await import('./data/mockData');
+    // Load mock data first as fallback
+    let mockSuppliers: any[] = [];
+    let mockActivities: any[] = [];
 
-      try {
-        setIsLoading(true);
-        setError(null);
+    try {
+      const mockData = await import('./data/mockData');
+      mockSuppliers = mockData.suppliers;
+      mockActivities = mockData.agentActivities;
+    } catch (e) {
+      console.warn("Could not load mock data", e);
+    }
 
-        // Try to fetch from backend with timeout
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Backend request timeout')), 5000)
-        );
+    try {
+      setIsLoading(true);
+      setError(null);
 
-        const fetchPromise = (async () => {
-          // Fetch suppliers with risk scores
-          const suppliersData = await suppliersAPI.getAll();
+      // Try to fetch from backend with timeout
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Backend request timeout')), 5000)
+      );
 
-          // Transform backend data to match frontend Supplier type
-          const transformedSuppliers: Supplier[] = suppliersData.map((s: any) => ({
-            id: String(s.id),
-            name: s.name,
-            riskScore: s.latest_risk_score || 0,
-            status: s.status.toLowerCase() as any,
-            region: s.region || 'Unknown',
-            category: s.category || 'Uncategorized',
-            trends: {
-              riskScore: s.risk_trend || 0,
-              delivery: 0,
-              quality: 0,
-            },
-            contracts: s.total_contracts || 0,
-            lastActivity: s.updated_at || s.created_at,
-          }));
+      const fetchPromise = (async () => {
+        // Fetch suppliers with risk scores
+        const suppliersData = await suppliersAPI.getAll();
 
-          // Fetch agent activities (limit to recent 10)
-          const activitiesData = await agentsAPI.getActivity({ limit: 10 });
+        // Transform backend data to match frontend Supplier type
+        const transformedSuppliers: Supplier[] = suppliersData.map((s: any) => ({
+          id: String(s.id),
+          name: s.name,
+          riskScore: s.latest_risk_score || 0,
+          status: s.status.toLowerCase() as any,
+          region: s.region || 'Unknown',
+          category: s.category || 'Uncategorized',
+          trends: {
+            riskScore: s.risk_trend || 0,
+            delivery: 0,
+            quality: 0,
+          },
+          contracts: s.total_contracts || 0,
+          lastActivity: s.updated_at || s.created_at,
+        }));
 
-          // Transform backend data to match frontend AgentActivity type
-          const transformedActivities: AgentActivity[] = activitiesData.map((a: any) => ({
-            id: String(a.id),
-            agent: a.agent_type,
-            action: a.activity_type,
-            supplierId: String(a.supplier_id),
-            supplierName: a.supplier_name || 'Unknown Supplier',
-            timestamp: a.created_at,
-            status: a.status,
-            confidence: a.confidence_score,
-          }));
+        // Fetch agent activities (limit to recent 10)
+        const activitiesData = await agentsAPI.getActivity({ limit: 10 });
 
-          return { suppliers: transformedSuppliers, activities: transformedActivities };
-        })();
+        // Transform backend data to match frontend AgentActivity type
+        const transformedActivities: AgentActivity[] = activitiesData.map((a: any) => ({
+          id: String(a.id),
+          agent: a.agent_type,
+          action: a.activity_type,
+          supplierId: String(a.supplier_id),
+          supplierName: a.supplier_name || 'Unknown Supplier',
+          timestamp: a.created_at,
+          status: a.status,
+          confidence: a.confidence_score,
+        }));
 
-        const result = await Promise.race([fetchPromise, timeoutPromise]) as any;
+        return { suppliers: transformedSuppliers, activities: transformedActivities };
+      })();
 
-        setSuppliers(result.suppliers);
-        setAgentActivities(result.activities);
-        toast.success('Connected to backend');
-      } catch (err: any) {
-        console.error('Backend unavailable, using demo data:', err);
+      const result = await Promise.race([fetchPromise, timeoutPromise]) as any;
+
+      setSuppliers(result.suppliers);
+      setAgentActivities(result.activities);
+      // toast.success('Connected to backend'); // Too noisy on every refresh
+    } catch (err: any) {
+      console.error('Backend unavailable, using demo data:', err);
+      // Only show error if we aren't falling back gracefully or if it's user initiated/unexpected
+      if (suppliers.length === 0) {
         setError(err.message || 'Backend unavailable');
-
-        // Use mock data on error
+        toast.info('Running in demo mode - backend unavailable');
         setSuppliers(mockSuppliers);
         setAgentActivities(mockActivities);
-        toast.info('Running in demo mode - backend unavailable');
-      } finally {
-        setIsLoading(false);
       }
-    };
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentScreen, suppliers.length]);
 
-    fetchData();
-  }, [currentScreen]);
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
 
   const handleOnboardingComplete = (profile: OnboardingProfile) => {
     setUserProfile(profile);
@@ -158,30 +169,46 @@ export default function App() {
     setCurrentScreen('supplier-detail');
   };
 
-  const handleSendMessage = (message: string) => {
+  const handleSendMessage = async (message: string) => {
     const newMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       sender: 'user',
       message,
       timestamp: new Date().toISOString(),
     };
-    setChatMessages([...chatMessages, newMessage]);
+    setChatMessages((prev) => [...prev, newMessage]);
+    setChatLoading(true);
 
-    // Simulate agent response
-    setTimeout(() => {
+    try {
+      // Show typing indicator via a temporary placeholder or state passed down
+      // For now, valid response comes from API
+      const response = await agentsAPI.chat(message);
+
       const agentMessage: ChatMessage = {
         id: `msg-${Date.now()}-agent`,
         sender: 'agent',
-        message: 'I understand your request. Let me analyze that for you...',
+        message: response.response,
         timestamp: new Date().toISOString(),
+        quickReplies: response.quick_replies,
       };
       setChatMessages((prev) => [...prev, agentMessage]);
-    }, 1000);
+    } catch (error) {
+      console.error("Chat failed:", error);
+      const errorMessage: ChatMessage = {
+        id: `msg-${Date.now()}-error`,
+        sender: 'agent',
+        message: "I'm having trouble connecting. Please try again.",
+        timestamp: new Date().toISOString(),
+      };
+      setChatMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const handleQuickReply = (reply: string) => {
     handleSendMessage(reply);
-    
+
     if (reply === 'Yes - show details' || reply === 'Show MetalWorks details') {
       setTimeout(() => {
         const supplierId = reply.includes('MetalWorks') ? '4' : '2';
@@ -276,9 +303,8 @@ export default function App() {
                 <Button
                   variant="ghost"
                   onClick={() => setCurrentScreen('dashboard')}
-                  className={`text-white hover:bg-white/10 gap-2 ${
-                    currentScreen === 'dashboard' ? 'bg-white/20' : ''
-                  }`}
+                  className={`text-white hover:bg-white/10 gap-2 ${currentScreen === 'dashboard' ? 'bg-white/20' : ''
+                    }`}
                 >
                   <LayoutDashboard className="w-4 h-4" />
                   Dashboard
@@ -286,9 +312,8 @@ export default function App() {
                 <Button
                   variant="ghost"
                   onClick={() => setCurrentScreen('alerts')}
-                  className={`text-white hover:bg-white/10 gap-2 ${
-                    currentScreen === 'alerts' ? 'bg-white/20' : ''
-                  }`}
+                  className={`text-white hover:bg-white/10 gap-2 ${currentScreen === 'alerts' ? 'bg-white/20' : ''
+                    }`}
                 >
                   <AlertTriangle className="w-4 h-4" />
                   Alerts
@@ -296,9 +321,8 @@ export default function App() {
                 <Button
                   variant="ghost"
                   onClick={() => setCurrentScreen('sourcing')}
-                  className={`text-white hover:bg-white/10 gap-2 ${
-                    currentScreen === 'sourcing' ? 'bg-white/20' : ''
-                  }`}
+                  className={`text-white hover:bg-white/10 gap-2 ${currentScreen === 'sourcing' ? 'bg-white/20' : ''
+                    }`}
                 >
                   <TrendingDown className="w-4 h-4" />
                   Sourcing
@@ -306,9 +330,8 @@ export default function App() {
                 <Button
                   variant="ghost"
                   onClick={() => setCurrentScreen('contract')}
-                  className={`text-white hover:bg-white/10 gap-2 ${
-                    currentScreen === 'contract' ? 'bg-white/20' : ''
-                  }`}
+                  className={`text-white hover:bg-white/10 gap-2 ${currentScreen === 'contract' ? 'bg-white/20' : ''
+                    }`}
                 >
                   <FileText className="w-4 h-4" />
                   Contracts
@@ -316,9 +339,8 @@ export default function App() {
                 <Button
                   variant="ghost"
                   onClick={() => setCurrentScreen('analytics')}
-                  className={`text-white hover:bg-white/10 gap-2 ${
-                    currentScreen === 'analytics' ? 'bg-white/20' : ''
-                  }`}
+                  className={`text-white hover:bg-white/10 gap-2 ${currentScreen === 'analytics' ? 'bg-white/20' : ''
+                    }`}
                 >
                   <BarChart3 className="w-4 h-4" />
                   Analytics
@@ -362,13 +384,13 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F9FBFC] to-[#FFFFFF] dark:from-[#0F1419] dark:to-[#1F2D3D] transition-colors duration-300">
       {renderNavigation()}
-      
+
       {currentScreen === 'onboarding' && (
         <Onboarding onComplete={handleOnboardingComplete} />
       )}
-      
+
       {currentScreen === 'login' && <Login onLogin={handleLogin} />}
-      
+
       {currentScreen === 'dashboard' && (
         <Dashboard
           suppliers={suppliers}
@@ -376,13 +398,15 @@ export default function App() {
           chatMessages={chatMessages}
           onSendMessage={handleSendMessage}
           onQuickReply={handleQuickReply}
+          isChatLoading={chatLoading}
           agentActivities={agentActivities}
           onActivityClick={handleActivityClick}
           events={allEvents}
           onAlertTickerClick={handleAlertTickerClick}
+          onRefresh={refreshData}
         />
       )}
-      
+
       {currentScreen === 'supplier-detail' && selectedSupplier && (
         <SupplierDetail
           supplier={selectedSupplier}
@@ -390,9 +414,10 @@ export default function App() {
           onBack={() => setCurrentScreen('dashboard')}
           onApprove={handleApprove}
           onAskAgent={handleAskAgent}
+          onRefresh={refreshData}
         />
       )}
-      
+
       {currentScreen === 'alerts' && (
         <Alerts
           events={allEvents}
@@ -400,7 +425,7 @@ export default function App() {
           onEventClick={handleEventClick}
         />
       )}
-      
+
       {currentScreen === 'sourcing' && (
         <SourcingFlow
           suppliers={suppliers}
@@ -408,7 +433,7 @@ export default function App() {
           onComplete={handleSourcingComplete}
         />
       )}
-      
+
       {currentScreen === 'contract' && (
         <ContractReview
           onBack={() => setCurrentScreen('dashboard')}
@@ -422,14 +447,14 @@ export default function App() {
           onBack={() => setCurrentScreen('dashboard')}
         />
       )}
-      
+
       <NotificationCenter
         isOpen={showNotifications}
         onClose={() => setShowNotifications(false)}
         events={allEvents}
         onEventClick={handleNotificationEventClick}
       />
-      
+
       <Toaster position="top-right" />
     </div>
   );

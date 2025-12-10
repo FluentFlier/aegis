@@ -102,6 +102,31 @@ export const suppliersAPI = {
   getContracts: async (id: number) => {
     return apiFetch(`/api/suppliers/${id}/contracts`);
   },
+
+  // Upload document
+  uploadDocument: async (id: number, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // We can't use apiFetch for FormData because we don't want Content-Type: application/json
+    const url = `${API_BASE_URL}/api/suppliers/${id}/upload-document`;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        throw new Error(error.detail || `HTTP ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error(`API Error (uploadDocument):`, error);
+      throw error;
+    }
+  },
 };
 
 /**
@@ -243,6 +268,14 @@ export const agentsAPI = {
   // Get stats
   getStats: async () => {
     return apiFetch('/api/agents/stats');
+  },
+
+  // Chat with agent
+  chat: async (message: string, context?: any) => {
+    return apiFetch('/api/agents/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, context }),
+    });
   },
 };
 

@@ -26,6 +26,16 @@ class AgentResponse(BaseModel):
     result: dict
 
 
+class ChatRequest(BaseModel):
+    message: str
+    context: Optional[dict] = None
+
+
+class ChatResponse(BaseModel):
+    response: str
+    quick_replies: list[str]
+
+
 @router.post("/dispatch", response_model=AgentResponse)
 async def dispatch_agent(request: AgentDispatchRequest, db: Session = Depends(get_db)):
     """
@@ -65,6 +75,23 @@ async def dispatch_agent(request: AgentDispatchRequest, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent dispatch failed: {str(e)}")
+
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat_agent(request: ChatRequest, db: Session = Depends(get_db)):
+    """
+    Chat with the Aegis AI Assistant.
+    """
+    orchestrator = AegisOrchestrator(db)
+    
+    try:
+        result = await orchestrator.chat(request.message, request.context)
+        return {
+            "response": result.get("response", "I didn't understand that."),
+            "quick_replies": result.get("quick_replies", [])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 
 @router.get("/activity")

@@ -10,20 +10,17 @@ interface ChatInterfaceProps {
   onClose?: () => void;
   onSendMessage?: (message: string) => void;
   onQuickReply?: (reply: string) => void;
+  isLoading?: boolean;
 }
 
-export function ChatInterface({ messages, onClose, onSendMessage, onQuickReply }: ChatInterfaceProps) {
+export function ChatInterface({ messages, onClose, onSendMessage, onQuickReply, isLoading }: ChatInterfaceProps) {
   const [inputValue, setInputValue] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  // removed local isTyping state
 
   const handleSend = () => {
-    if (inputValue.trim() && onSendMessage) {
+    if (inputValue.trim() && onSendMessage && !isLoading) {
       onSendMessage(inputValue);
       setInputValue('');
-      
-      // Simulate agent typing
-      setIsTyping(true);
-      setTimeout(() => setIsTyping(false), 2000);
     }
   };
 
@@ -73,11 +70,10 @@ export function ChatInterface({ messages, onClose, onSendMessage, onQuickReply }
                 className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[80%] rounded-lg p-3 ${
-                    msg.sender === 'user'
+                  className={`max-w-[80%] rounded-lg p-3 ${msg.sender === 'user'
                       ? 'bg-[#2EB8A9] text-white'
                       : 'bg-gray-100 text-gray-900'
-                  }`}
+                    }`}
                 >
                   {msg.sender === 'agent' && (
                     <div className="flex items-center gap-2 mb-1">
@@ -87,9 +83,8 @@ export function ChatInterface({ messages, onClose, onSendMessage, onQuickReply }
                   )}
                   <p className="text-sm">{msg.message}</p>
                   <p
-                    className={`text-xs mt-1 ${
-                      msg.sender === 'user' ? 'text-white/70' : 'text-gray-500'
-                    }`}
+                    className={`text-xs mt-1 ${msg.sender === 'user' ? 'text-white/70' : 'text-gray-500'
+                      }`}
                   >
                     {formatTime(msg.timestamp)}
                   </p>
@@ -116,7 +111,7 @@ export function ChatInterface({ messages, onClose, onSendMessage, onQuickReply }
           ))}
 
           {/* Typing indicator */}
-          {isTyping && (
+          {isLoading && (
             <div className="flex justify-start">
               <div className="bg-gray-100 rounded-lg p-3">
                 <div className="flex items-center gap-2">
@@ -154,8 +149,8 @@ export function ChatInterface({ messages, onClose, onSendMessage, onQuickReply }
             <Button
               size="icon"
               onClick={handleSend}
-              disabled={!inputValue.trim()}
-              className="bg-[#2EB8A9] hover:bg-[#2EB8A9]/90"
+              disabled={!inputValue.trim() || isLoading}
+              className={`bg-[#2EB8A9] hover:bg-[#2EB8A9]/90 ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               <Send className="w-4 h-4" />
             </Button>
